@@ -36,25 +36,28 @@ for arg in "$@"; do
         --install)  DO_INSTALL=1 ;;
         --network)  DO_NETWORK=1 ;;
         --doctor)   DO_DOCTOR=1 ;;
-        -h|--help)  sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)  sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
     esac
 done
 
-# A virtualenv's python, if one is active or present, otherwise the system one.
-if [[ -x "$ROOT/.venv/bin/python" ]]; then
-    PYTHON="$ROOT/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON=python3
-else
-    PYTHON=python
-fi
-
 have() { command -v "$1" >/dev/null 2>&1; }
 
-if ! "$PYTHON" --version >/dev/null 2>&1; then
-    echo "python3 was not found. Install it with your package manager, e.g." >&2
-    echo "    sudo apt install python3 python3-venv python3-pip" >&2
+# A virtualenv's python if one is present, otherwise the first system one that
+# actually runs. Being on PATH is not enough to go on: Windows ships a python3
+# stub that exists, resolves, and then refuses to do anything.
+PYTHON=""
+for candidate in "$ROOT/.venv/bin/python" python3 python; do
+    if "$candidate" --version >/dev/null 2>&1; then
+        PYTHON="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$PYTHON" ]]; then
+    echo "No working python was found on PATH. Install it, e.g." >&2
+    echo "    sudo apt install python3 python3-venv python3-pip     # Debian/Ubuntu" >&2
+    echo "    sudo dnf install python3 python3-pip                  # Fedora/RHEL" >&2
     exit 1
 fi
 
