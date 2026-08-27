@@ -1,0 +1,65 @@
+import http from './http'
+
+const base = (name) => `/projects/${encodeURIComponent(name)}/training`
+
+export const trainingService = {
+  options: (name) =>
+    http.get(`${base(name)}/options`).then((r) => r.data),
+
+  start: (name, config) =>
+    http.post(`${base(name)}/start`, config).then((r) => r.data),
+
+  status: (name) =>
+    http.get(`${base(name)}/status`).then((r) => r.data),
+
+  stop: (name) =>
+    http.post(`${base(name)}/stop`).then((r) => r.data),
+
+  reset: (name) =>
+    http.post(`${base(name)}/reset`).then((r) => r.data),
+
+  logs: (name, lastN = 200) =>
+    http.get(`${base(name)}/logs`, { params: { last_n: lastN } }).then((r) => r.data),
+
+  models: (name) =>
+    http.get(`${base(name)}/models`).then((r) => r.data),
+
+  /** Download URL for a weights file. The backend checks it is inside the project. */
+  downloadUrl: (name, path) =>
+    `/api${base(name)}/models/download?path=${encodeURIComponent(path)}`,
+
+  history: (name) =>
+    http.get(`${base(name)}/history`).then((r) => r.data),
+
+  // ── cross-project ─────────────────────────────────────────────────────
+  allHistory: () =>
+    http.get('/history').then((r) => r.data),
+
+  overview: () =>
+    http.get('/overview').then((r) => r.data),
+
+  /** Every model this installation has trained, newest first. */
+  listTrainedModels: () => http.get('/models').then((r) => r.data.models || []),
+
+  /**
+   * Run a model over some images.
+   *
+   * `model` is either an uploaded File or, for one the server trained itself,
+   * a { path } naming it — sending the path avoids downloading the weights and
+   * posting them straight back to the machine that wrote them.
+   */
+  testModel: (model, imageFiles, options = {}) => {
+    const form = new FormData()
+    if (model && model.path) form.append('model_path', model.path)
+    else form.append('model', model)
+    for (const file of imageFiles) form.append('images', file)
+    form.append('score_threshold', String(options.scoreThreshold ?? 0.5))
+    form.append('label_names', options.labelNames ?? '')
+    form.append('img_size', String(options.imgSize ?? 640))
+    return http
+      .post('/models/test', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data)
+  }
+}
+
+export default trainingService

@@ -1,0 +1,12 @@
+{
+  "model_name": "test",
+  "num_images": 23,
+  "num_labels": 1,
+  "labels": [
+    "B1"
+  ],
+  "labels_map": {
+    "B1": 0
+  },
+  "created_at": "2025-12-14T20:50:04.403092"
+}

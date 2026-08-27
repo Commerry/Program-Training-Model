@@ -1,0 +1,958 @@
+/* ==========================================================================
+   Vision Training Platform — design system
+
+   Dark by default. Every colour, radius, shadow and easing used anywhere in
+   the app is declared here as a token; views reference the tokens rather than
+   literals, so the palette can be retuned in one place.
+   ========================================================================== */
+
+:root {
+  /* ── Surfaces ──────────────────────────────────────────────────────────
+     A five-step ramp from the page background up to a hovered control. Depth
+     comes from these steps plus a hairline border, not from heavy shadows —
+     large blurred shadows read as muddy smears on a dark background. */
+  --bg:            #0a0b10;
+  --bg-subtle:     #0e1017;
+  --surface:       #14161f;
+  --surface-2:     #191c27;
+  --surface-3:     #212533;
+  --surface-hover: #272c3c;
+
+  --border:        #232735;
+  --border-strong: #333949;
+  --border-subtle: #1a1e29;
+
+  /* ── Text ───────────────────────────────────────────────────────────── */
+  --text:          #e9ecf5;
+  --text-2:        #9aa3b8;
+  --text-3:        #646d82;
+  --text-inverse:  #0a0b10;
+
+  /* ── Accent ─────────────────────────────────────────────────────────── */
+  --accent:        #7c5cff;
+  --accent-hover:  #8f73ff;
+  --accent-muted:  #5b43c4;
+  --accent-soft:   rgba(124, 92, 255, 0.12);
+  --accent-softer: rgba(124, 92, 255, 0.06);
+  --accent-ring:   rgba(124, 92, 255, 0.35);
+
+  --cyan:          #22d3ee;
+  --cyan-soft:     rgba(34, 211, 238, 0.12);
+  --pink:          #f472b6;
+  --amber:         #fbbf24;
+
+  /* ── Status ─────────────────────────────────────────────────────────── */
+  --success:       #34d399;
+  --success-soft:  rgba(52, 211, 153, 0.12);
+  --warning:       #fbbf24;
+  --warning-soft:  rgba(251, 191, 36, 0.12);
+  --danger:        #f87171;
+  --danger-soft:   rgba(248, 113, 113, 0.12);
+  --info:          #60a5fa;
+  --info-soft:     rgba(96, 165, 250, 0.12);
+
+  /* ── Gradients ──────────────────────────────────────────────────────── */
+  --grad-accent:   linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
+  --grad-accent-2: linear-gradient(135deg, #a78bfa 0%, #7c5cff 55%, #4f46e5 100%);
+  --grad-warm:     linear-gradient(135deg, #f472b6 0%, #fb923c 100%);
+  --grad-success:  linear-gradient(135deg, #34d399 0%, #22d3ee 100%);
+  --grad-danger:   linear-gradient(135deg, #f87171 0%, #f472b6 100%);
+  --grad-surface:  linear-gradient(160deg, #191c27 0%, #14161f 100%);
+  /* Sits behind the app: two faint accent pools that keep a large dark area
+     from reading as flat black. */
+  --grad-page:
+    radial-gradient(1100px 620px at 12% -8%, rgba(124, 92, 255, 0.10), transparent 60%),
+    radial-gradient(900px 520px at 92% 4%, rgba(34, 211, 238, 0.07), transparent 62%);
+
+  /* ── Type ─────────────────────────────────────────────────────────────
+     Every pairing is a Latin face plus a Thai face chosen to sit at a similar
+     weight and x-height, because the UI mixes both in the same sentence. Both
+     are bundled, so nothing is fetched at runtime.
+
+     Switch by setting data-font on <html>:
+         document.documentElement.dataset.font = 'plex'
+     The presets are listed in fonts.css. --font-fallback is appended to every
+     one so a missing glyph still lands on something sensible. */
+  --font-fallback: ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+                   'Leelawadee UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Space Grotesk for Latin: mechanical, slightly squared, with a strong
+     personality in headings and figures. IBM Plex Sans Thai carries the Thai
+     text at a matching weight. */
+  --font: 'Space Grotesk', 'IBM Plex Sans Thai', var(--font-fallback);
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'SF Mono',
+               Menlo, Consolas, monospace;
+
+  /* Base is 16px. The ramp is rebased around it rather than scaled from the
+     old 14px, so headings keep their proportion to body text. */
+  --fs-xs:   0.75rem;    /* 12px — badges, hints */
+  --fs-sm:   0.875rem;   /* 14px — secondary text, table cells */
+  --fs-base: 1rem;       /* 16px — body, inputs, buttons */
+  --fs-md:   1.0625rem;  /* 17px — card titles */
+  --fs-lg:   1.1875rem;  /* 19px — section headings */
+  --fs-xl:   1.5rem;     /* 24px */
+  --fs-2xl:  1.875rem;   /* 30px */
+  --fs-3xl:  2.375rem;   /* 38px — headline figures */
+
+  /* ── Shape and motion ───────────────────────────────────────────────── */
+  --r-sm: 6px;
+  --r:    10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-full: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow:    0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-accent: 0 6px 24px rgba(124, 92, 255, 0.28);
+
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 120ms var(--ease);
+  --t:      200ms var(--ease);
+  --t-slow: 320ms var(--ease-out);
+
+  --navbar-h: 62px;
+  --sidebar-w: 70px;
+  --sidebar-w-open: 224px;
+
+  /* Legacy aliases. The views were written against an earlier light palette;
+     these keep older selectors rendering correctly on the dark surface until
+     each is migrated. */
+  --primary-50:  var(--accent-softer);
+  --primary-100: var(--accent-soft);
+  --primary-200: rgba(124, 92, 255, 0.2);
+  --primary-300: var(--accent-muted);
+  --primary-400: var(--accent-hover);
+  --primary-500: var(--accent);
+  --primary-600: var(--accent);
+  --primary-700: var(--accent-hover);
+  --primary-800: var(--accent-muted);
+  --primary-900: var(--accent-muted);
+  --gray-50:  var(--surface);
+  --gray-100: var(--surface-2);
+  --gray-200: var(--surface-3);
+  --gray-300: var(--border-strong);
+  --gray-400: var(--text-3);
+  --gray-500: var(--text-3);
+  --gray-600: var(--text-2);
+  --gray-700: var(--text-2);
+  --gray-800: var(--text);
+  --gray-900: var(--text);
+  --background: var(--bg);
+  --surface-color: var(--surface);
+  --border-color: var(--border);
+  --text-primary: var(--text);
+  --text-secondary: var(--text-2);
+  --text-tertiary: var(--text-3);
+  --success-100: var(--success-soft);
+  --success-500: var(--success);
+  --success-600: var(--success);
+  --warning-100: var(--warning-soft);
+  --warning-500: var(--warning);
+  --warning-600: var(--warning);
+  --danger-100: var(--danger-soft);
+  --danger-500: var(--danger);
+  --danger-600: var(--danger);
+  --info-100: var(--info-soft);
+  --info-500: var(--info);
+  --info-600: var(--info);
+
+  /* Full tonal ramps and radius aliases the views reference. An undefined
+     custom property invalidates its whole declaration, so a single missing
+     name here silently removed an entire gradient or border. */
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r);
+  --radius-lg: var(--r-md);
+  --radius-xl: var(--r-lg);
+
+  --success-50:  var(--success-soft);
+  --success-200: rgba(52, 211, 153, 0.25);
+  --success-300: rgba(52, 211, 153, 0.4);
+  --success-400: #6ee7b7;
+  --success-700: var(--success);
+  --success-800: #6ee7b7;
+
+  --warning-50:  var(--warning-soft);
+  --warning-200: rgba(251, 191, 36, 0.25);
+  --warning-300: rgba(251, 191, 36, 0.4);
+  --warning-400: #fcd34d;
+  --warning-700: var(--warning);
+  --warning-800: #fcd34d;
+
+  --danger-50:  var(--danger-soft);
+  --danger-200: rgba(248, 113, 113, 0.25);
+  --danger-300: rgba(248, 113, 113, 0.4);
+  --danger-400: #fca5a5;
+  --danger-700: var(--danger);
+  --danger-800: #fca5a5;
+
+  --error-100: var(--danger-soft);
+  --error-500: var(--danger);
+  --error-600: var(--danger);
+  --error-700: var(--danger);
+
+  --purple-50:  var(--accent-softer);
+  --purple-200: rgba(124, 92, 255, 0.25);
+  --purple-500: var(--accent);
+  --purple-600: var(--accent);
+}
+
+/* ── Font pairings ──────────────────────────────────────────────────────────
+   Set data-font on <html> to switch. Each pairs a Latin face with a Thai face
+   of comparable weight so a mixed sentence does not look assembled from two
+   different documents.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Clean and neutral. The most legible at 13-14px, which is most of this UI. */
+:root[data-font='inter'] {
+  --font: 'Inter', 'IBM Plex Sans Thai', var(--font-fallback);
+}
+
+/* Technical. Latin and Thai are drawn by the same team, so the mix is the
+   most consistent of these options — and it suits an engineering tool. */
+:root[data-font='plex'] {
+  --font: 'IBM Plex Sans', 'IBM Plex Sans Thai', var(--font-fallback);
+}
+
+/* Geometric and friendly, with noticeably rounder counters. */
+:root[data-font='jakarta'] {
+  --font: 'Plus Jakarta Sans', 'Anuphan', var(--font-fallback);
+}
+
+/* Modern and slightly condensed; fits more into a narrow column. */
+:root[data-font='manrope'] {
+  --font: 'Manrope', 'Anuphan', var(--font-fallback);
+}
+
+/* Distinctive and mechanical. Strong personality in headings, less neutral
+   in long paragraphs. */
+:root[data-font='grotesk'] {
+  --font: 'Space Grotesk', 'IBM Plex Sans Thai', var(--font-fallback);
+}
+
+/* The Thai-first pairing: Sarabun is the face most Thai documents use. */
+:root[data-font='sarabun'] {
+  --font: 'Sarabun', 'Sarabun', var(--font-fallback);
+}
+
+/* Whatever the operating system provides — no bundled font is used. */
+:root[data-font='system'] {
+  --font: var(--font-fallback);
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  color: var(--text);
+  background-color: var(--bg);
+  background-image: var(--grad-page);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Space Grotesk's default figures are already tabular-friendly; contextual
+     alternates keep the Thai combining marks positioned correctly. */
+  font-variant-ligatures: contextual;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.25;
+  /* Space Grotesk is already fairly tight; the heavy negative tracking that
+     suited Inter closes its counters up here. */
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+h1 { font-size: var(--fs-2xl); letter-spacing: -0.02em; }
+h2 { font-size: var(--fs-xl); letter-spacing: -0.015em; }
+h3 { font-size: var(--fs-lg); }
+
+a {
+  color: var(--accent-hover);
+  text-decoration: none;
+  transition: color var(--t-fast);
+}
+
+a:hover { color: var(--cyan); }
+
+code, pre, .text-mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* Tabular figures stop metrics from jittering as they tick up. */
+.tnum, .stat-value, .metric-val { font-variant-numeric: tabular-nums; }
+
+::selection {
+  background: var(--accent-ring);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ── Cursors ────────────────────────────────────────────────────────────────
+   The browser paints a text I-beam over anything it treats as text, so a
+   heading, a stat number or a table cell all invite a click that does nothing.
+
+   Two separate decisions, easy to conflate:
+
+     cursor       what the pointer looks like
+     user-select  whether the text can be highlighted and copied
+
+   `cursor: auto` is not neutral — over text it resolves to the I-beam, which
+   is exactly what made file paths and project names still look editable after
+   the first attempt at this. So copyable text gets `cursor: default` with
+   `user-select: text`: an arrow you can still select with. Only a field that
+   accepts typing gets the I-beam.
+   ────────────────────────────────────────────────────────────────────────── */
+
+body {
+  cursor: default;
+}
+
+/* `cursor` is inherited, so the rule above already covers everything that does
+   not override it. What follows is only the exceptions. */
+
+/* Fields that accept typing — the one place an I-beam is correct. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='submit']):not([type='button']),
+textarea,
+[contenteditable='true'] {
+  cursor: text;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Controls. */
+a,
+button,
+select,
+summary,
+label,
+[role='button'],
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+.card.is-interactive,
+.project-card,
+.image-card,
+.model-card,
+.dataset-card,
+.nav-item,
+.dropdown-item,
+.filter-chip,
+.tool-btn,
+.roi-toggle,
+.toggle-switch {
+  cursor: pointer;
+}
+
+:disabled,
+.btn:disabled,
+.btn-icon:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* ── Selection ──────────────────────────────────────────────────────────────
+   Chrome — labels, headings, figures, nav — is not selectable, because
+   dragging across a button only ever produces a stray highlight. Content a
+   user may genuinely need to copy stays selectable, with the arrow cursor.
+   ────────────────────────────────────────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6,
+label, .form-label, .form-hint,
+.badge, .btn, .btn-icon, .nav-item, .nav-label, .nav-badge,
+.stat-label, .stat-value, .stat-sub,
+.card-title, .section-title, .page-title, .page-subtitle,
+.modal-title, .empty-state h3, .empty-state p,
+th, kbd, .filter-chip, .metric-key, .tab, .chart-title,
+.topbar-title, .topbar-count, .project-name-title, .project-desc-small {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Paths, logs, identifiers, messages: an arrow cursor, but copyable. */
+.text-mono, code, pre, kbd,
+.log-line, .log-box,
+.error-message, .success-message, .info-message,
+.model-name, .model-path, .project-name, .image-name,
+.server-info dd, .detection-label,
+.autolabel-done, .images-missing,
+.per-class-name, .metric-val {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--r-full);
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--border-strong); }
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+
+.container {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.content-wrapper {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 3rem;
+}
+
+.grid { display: grid; gap: 1rem; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 820px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); }
+  .content-wrapper { padding: 1rem; }
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--grad-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1.25rem;
+  transition: border-color var(--t), transform var(--t), box-shadow var(--t);
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+/* Only cards that navigate somewhere lift on hover; a static panel that moves
+   under the cursor reads as a bug. */
+.card.is-interactive {
+  cursor: pointer;
+}
+
+.card.is-interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-muted);
+  box-shadow: var(--shadow);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4375rem;
+  padding: 0.5625rem 1.0625rem;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 550;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast),
+              color var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+}
+
+.btn:active:not(:disabled) { transform: translateY(1px); }
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--grad-accent-2);
+  color: #fff;
+  box-shadow: var(--shadow-accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.12);
+  box-shadow: 0 8px 28px rgba(124, 92, 255, 0.38);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--accent-muted);
+}
+
+.btn-success {
+  background: var(--grad-success);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.btn-success:hover:not(:disabled) { filter: brightness(1.1); }
+
+.btn-danger {
+  background: var(--danger-soft);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--accent-muted);
+  color: var(--accent-hover);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.btn-sm { padding: 0.375rem 0.75rem; font-size: var(--fs-sm); border-radius: var(--r-sm); }
+.btn-lg { padding: 0.6875rem 1.375rem; font-size: var(--fs-md); border-radius: var(--r-md); }
+.btn-block { width: 100%; }
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+
+.form-group { margin-bottom: 1rem; }
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 0.4375rem;
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--text-2);
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 0.625rem 0.8125rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder { color: var(--text-3); }
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.form-input:disabled,
+.form-select:disabled,
+.form-textarea:disabled {
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
+.form-textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
+
+.form-select {
+  appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239aa3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8125rem center;
+}
+
+/* Every control, not just the ones carrying .form-input. A scoped rule that
+   restyles an input without naming a background would otherwise inherit the
+   browser default white field. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']),
+select,
+textarea {
+  background-color: var(--bg-subtle);
+  color: var(--text);
+  font-family: inherit;
+  border-color: var(--border-strong);
+}
+
+input::placeholder,
+textarea::placeholder { color: var(--text-3); }
+
+/* Inputs that live inside their own styled shell keep that shell's fill. */
+.search-box input,
+.navbar-search input,
+.search-input {
+  background-color: transparent;
+  border: none;
+}
+
+/* Chrome autofill paints its own yellow field; this keeps it dark. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-subtle) inset;
+  caret-color: var(--text);
+}
+
+.form-hint {
+  margin-top: 0.375rem;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.form-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: var(--fs-base);
+  color: var(--text-2);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+input[type='range'] { accent-color: var(--accent); }
+
+/* ── Badges ─────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.5625rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.badge-primary { background: var(--accent-soft); color: var(--accent-hover); border-color: rgba(124, 92, 255, 0.25); }
+.badge-success { background: var(--success-soft); color: var(--success); border-color: rgba(52, 211, 153, 0.25); }
+.badge-warning { background: var(--warning-soft); color: var(--warning); border-color: rgba(251, 191, 36, 0.25); }
+.badge-danger  { background: var(--danger-soft);  color: var(--danger);  border-color: rgba(248, 113, 113, 0.25); }
+.badge-info    { background: var(--info-soft);    color: var(--info);    border-color: rgba(96, 165, 250, 0.25); }
+.badge-neutral,
+.badge-gray,
+.badge-secondary { background: var(--surface-3); color: var(--text-2); border-color: var(--border-strong); }
+
+/* ── Messages ───────────────────────────────────────────────────────────── */
+
+.error-message,
+.success-message,
+.info-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6875rem 0.875rem;
+  margin: 0.75rem 0;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.error-message   { background: var(--danger-soft);  border-color: rgba(248, 113, 113, 0.3); color: #fca5a5; }
+.success-message { background: var(--success-soft); border-color: rgba(52, 211, 153, 0.3);  color: #6ee7b7; }
+.info-message    { background: var(--info-soft);    border-color: rgba(96, 165, 250, 0.3);  color: #93c5fd; }
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+table { width: 100%; border-collapse: collapse; }
+
+th {
+  padding: 0.6875rem 1rem;
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 0.75rem 1rem;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+tbody tr { transition: background var(--t-fast); }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr:last-child td { border-bottom: none; }
+
+/* ── Modal ──────────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(5, 6, 10, 0.72);
+  backdrop-filter: blur(6px);
+  animation: fade-in 160ms var(--ease);
+}
+
+.modal {
+  width: 100%;
+  max-width: 540px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  animation: modal-in 220ms var(--ease-out);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.125rem 1.375rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title { font-size: var(--fs-lg); font-weight: 600; }
+
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 1.375rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+
+.modal-close:hover { background: var(--surface-3); color: var(--text); }
+
+.modal-body { padding: 1.375rem; overflow-y: auto; }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  padding: 1.125rem 1.375rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Empty and loading states ───────────────────────────────────────────── */
+
+.empty-state,
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.empty-state h3 { color: var(--text-2); font-size: var(--fs-md); }
+.empty-state p { font-size: var(--fs-sm); max-width: 42ch; }
+.empty-state .btn { margin-top: 0.5rem; }
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--surface-3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Placeholder blocks shown while a panel's data is in flight. */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  border-radius: var(--r-sm);
+  animation: shimmer 1.4s infinite;
+}
+
+/* ── Utilities ──────────────────────────────────────────────────────────── */
+
+.muted { color: var(--text-3); }
+.text-accent { color: var(--accent-hover); }
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+
+/* Gradient text for headline numbers. */
+.text-gradient {
+  background: var(--grad-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.divider { height: 1px; background: var(--border); border: none; margin: 1.25rem 0; }
+
+.scroll-x { overflow-x: auto; }
+
+/* ── Animation ──────────────────────────────────────────────────────────── */
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-rise { animation: rise 320ms var(--ease-out) both; }
+
+/* A run in progress needs to look alive without being distracting. */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+.pulse { animation: pulse-soft 2s var(--ease) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

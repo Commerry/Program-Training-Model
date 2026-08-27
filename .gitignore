@@ -1,0 +1,52 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ── Node ────────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# ── Runtime data ────────────────────────────────────────────────────────────
+# Images are excluded because they are large and reproducible from the camera.
+#
+# Annotations are NOT excluded, deliberately. They are small JSON files and
+# they represent hours of manual work that cannot be regenerated. The previous
+# .gitignore excluded them alongside the images, so a "Download ZIP" of this
+# repo produced a project.json claiming 2232 annotated images with no images
+# and no annotations behind it — the counts survived the trip and the work did
+# not. Roughly 6000 boxes is about 2 MB of JSON; that belongs in version
+# control.
+data/instance/
+data/instance/secret_key
+data/weights/
+data/projects/*/images/
+data/projects/*/training/
+data/projects/*/exports/
+data/projects/*/index.json
+
+# ── Model files ─────────────────────────────────────────────────────────────
+*.pt
+*.pth
+*.onnx
+*.torchscript
+*.blob
+*.engine
+
+# ── Logs and local env ──────────────────────────────────────────────────────
+*.log
+.env
+.env.*
+!.env.example
+
+# Bundled fonts are committed on purpose: the app must render correctly
+# with no internet, so they are part of the source, not a build artefact.
+
+# ── Editors / OS ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,48 @@
+{
+  "name": "test01",
+  "description": "",
+  "created_at": "2026-03-26T09:50:23.373507",
+  "total_images": 2232,
+  "total_annotations": 5952,
+  "annotated_images": 2232,
+  "tags": {
+    "0": {
+      "boxes": 248,
+      "images": 248
+    },
+    "1": {
+      "boxes": 1240,
+      "images": 1240
+    },
+    "2": {
+      "boxes": 1240,
+      "images": 1240
+    },
+    "3": {
+      "boxes": 744,
+      "images": 496
+    },
+    "4": {
+      "boxes": 496,
+      "images": 496
+    },
+    "6": {
+      "boxes": 744,
+      "images": 744
+    },
+    "7": {
+      "boxes": 248,
+      "images": 248
+    },
+    "8": {
+      "boxes": 248,
+      "images": 248
+    },
+    "9": {
+      "boxes": 744,
+      "images": 496
+    }
+  },
+  "updated_at": "2026-04-20T16:21:21.577102",
+  "path": "d:\\Vision-PSE\\Train-Model-Webapp-main\\data\\projects\\test01"
+}

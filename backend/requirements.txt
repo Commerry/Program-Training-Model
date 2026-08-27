@@ -1,0 +1,26 @@
+# ── Web server ──────────────────────────────────────────────────────────────
+flask>=3.0
+flask-cors>=4.0
+flask-sqlalchemy>=3.1
+flask-login>=0.6
+flask-bcrypt>=1.0
+python-dotenv>=1.0
+
+# ── Data / imaging ──────────────────────────────────────────────────────────
+numpy>=1.24
+opencv-python>=4.8
+pillow>=10.0
+pyyaml>=6.0
+psutil>=5.9          # detects training workers that died without reporting
+
+# ── Training ────────────────────────────────────────────────────────────────
+torch>=2.0
+torchvision>=0.15
+ultralytics>=8.2     # YOLOv8/9/10/11 and RT-DETR training
+
+# ── Model export (optional but installed by default) ────────────────────────
+# The TorchScript ONNX exporter is used explicitly, so onnxscript (which the
+# newer dynamo exporter would pull in) is deliberately not required.
+onnx>=1.14
+onnxruntime>=1.16
+# blobconverter    # only needed to compile .blob files for Luxonis OAK devices
