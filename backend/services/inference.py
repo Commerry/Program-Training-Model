@@ -182,6 +182,15 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
                 label_names = resolved
                 label_source = f'matched project "{meta["project_name"]}" ({meta["source_key"]})'
 
+        # An ONNX export only accepts the resolution it was exported at, and a
+        # .pt should default to what it was trained at rather than to the
+        # screen's 640: running a 320-trained model at 640 detects far less,
+        # with nothing to say why.
+        from services import modelcache
+        native, fixed = modelcache.native_input_size(temp_path)
+        if native and (fixed or img_size in (None, 640)):
+            img_size = native
+
         if suffix == '.pth':
             results, device_label, used_labels = _run_frcnn(
                 temp_path, images, score_threshold, label_names, img_size
@@ -207,6 +216,7 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
             'resolved_label_names': label_names,
             'resolved_label_source': label_source,
             'total_images': len(results),
+            'img_size': img_size,
             'results': results,
         }
     finally:
@@ -360,3 +370,129 @@ def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
             })
 
     return results, str(device), active_labels
+
+
+# ── Live and per-frame detection ────────────────────────────────────────────
+#
+# The still-image path above returns an annotated JPEG, which is the right
+# answer for a handful of pictures and the wrong one for a stream: encoding a
+# whole frame as base64 several times a second wastes far more time and
+# bandwidth than the prediction itself, and the browser already has the pixels.
+# These return coordinates only and let the page draw over what it is already
+# showing.
+
+def detect_frame(model_path, image_bgr, score_threshold=0.5, label_names=None,
+                 img_size=640):
+    """
+    Boxes for one frame, using a model kept in memory between calls.
+
+    Returns (detections, labels_in_use). Each detection is the same shape the
+    still-image path produces, so the drawing code on the page is shared.
+    """
+    from services import modelcache
+
+    entry = modelcache.get(model_path, img_size=img_size)
+    try:
+        score_threshold = min(max(float(score_threshold), 0.0), 1.0)
+    except (TypeError, ValueError):
+        score_threshold = 0.5
+
+    label_names = [name for name in (label_names or []) if name]
+
+    if entry['kind'] == 'ultralytics':
+        return _detect_ultralytics(entry, image_bgr, score_threshold, label_names,
+                                   effective_img_size(entry, img_size))
+    return _detect_frcnn(entry, image_bgr, score_threshold, label_names)
+
+
+def effective_img_size(entry, requested):
+    """
+    The size to actually predict at.
+
+    An ONNX export has its resolution compiled into the graph, so a request for
+    anything else is not a preference to weigh but an error onnxruntime raises.
+    A .pt records what it was trained at, which is a strong default: a model
+    trained at 320 and run at 640 detects far less, and nothing on screen would
+    explain why.
+    """
+    native = entry.get('native_imgsz')
+    if not native:
+        return requested
+    if entry.get('fixed_imgsz'):
+        return native
+    # The still-image screen sends 640 whether or not the user chose it, so an
+    # untouched default should not override what the model was trained at.
+    return native if requested in (None, 640) else requested
+
+
+def _detect_ultralytics(entry, bgr, threshold, label_names, img_size):
+    active = label_names or entry['labels'] or []
+
+    def label_for(class_id):
+        return str(active[class_id]) if 0 <= class_id < len(active) else f'class_{class_id}'
+
+    prediction = entry['model'].predict(bgr, conf=threshold, verbose=False,
+                                        imgsz=img_size)[0]
+    boxes = prediction.boxes
+    detections = []
+    if boxes is not None and len(boxes):
+        xyxy = boxes.xyxy.cpu().numpy()
+        scores = boxes.conf.cpu().numpy()
+        class_ids = boxes.cls.cpu().numpy().astype(int)
+        for box, score, class_id in zip(xyxy, scores, class_ids):
+            x1, y1, x2, y2 = (int(v) for v in box.tolist())
+            if x2 - x1 < 1 or y2 - y1 < 1:
+                continue
+            detections.append({
+                'label_id': int(class_id),
+                'label_name': label_for(int(class_id)),
+                'score': round(float(score), 4),
+                'box': [x1, y1, x2, y2],
+            })
+    return detections, active
+
+
+def _detect_frcnn(entry, bgr, threshold, label_names):
+    import torch
+
+    num_classes = entry['num_classes']
+    active = list(label_names or [f'class_{i}' for i in range(1, num_classes + 1)])
+
+    def label_for(class_id):
+        if class_id <= 0:
+            return 'background'
+        index = class_id - 1
+        return str(active[index]) if index < len(active) else f'class_{class_id}'
+
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().div_(255.0)
+    tensor = tensor.to(entry['device'])
+    with torch.no_grad():
+        output = entry['model']([tensor])[0]
+
+    detections = []
+    for box, score, class_id in zip(output['boxes'].cpu().numpy(),
+                                    output['scores'].cpu().numpy(),
+                                    output['labels'].cpu().numpy().astype(int)):
+        if float(score) < threshold:
+            continue
+        x1, y1, x2, y2 = (int(v) for v in box.tolist())
+        if x2 - x1 < 1 or y2 - y1 < 1:
+            continue
+        detections.append({
+            'label_id': int(class_id),
+            'label_name': label_for(int(class_id)),
+            'score': round(float(score), 4),
+            'box': [x1, y1, x2, y2],
+        })
+    return detections, active
+
+
+def decode_frame(file_storage):
+    """One uploaded frame as a BGR array, or None if it is not an image."""
+    if file_storage is None:
+        return None
+    data = np.frombuffer(file_storage.read(), np.uint8)
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)

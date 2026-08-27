@@ -38,6 +38,54 @@ export const trainingService = {
   overview: () =>
     http.get('/overview').then((r) => r.data),
 
+  /**
+   * Boxes for one frame. Used by the webcam feed, several times a second.
+   *
+   * Returns coordinates only: the page already has the pixels on screen, so
+   * asking the server to send an annotated copy back would cost more than the
+   * prediction and would still arrive a frame late.
+   */
+  detectFrame: (model, frameBlob, options = {}) => {
+    const form = new FormData()
+    if (model && model.path) form.append('model_path', model.path)
+    else form.append('model', model)
+    form.append('frame', frameBlob, 'frame.jpg')
+    form.append('score_threshold', String(options.scoreThreshold ?? 0.5))
+    form.append('label_names', options.labelNames ?? '')
+    form.append('img_size', String(options.imgSize ?? 640))
+    return http
+      .post('/models/detect', form,
+        { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data)
+  },
+
+  /**
+   * Analyse a whole video. Returns a job immediately; poll videoStatus.
+   *
+   * Only a model this server trained can be used, because the analysis outlives
+   * the request that started it and an uploaded copy would be gone before the
+   * worker got to it.
+   */
+  analyseVideo: (model, videoFile, options = {}) => {
+    const form = new FormData()
+    form.append('model_path', model.path)
+    form.append('video', videoFile)
+    form.append('score_threshold', String(options.scoreThreshold ?? 0.5))
+    form.append('label_names', options.labelNames ?? '')
+    form.append('img_size', String(options.imgSize ?? 640))
+    form.append('sample_fps', String(options.sampleFps ?? 5))
+    return http
+      .post('/models/video', form,
+        { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data.job)
+  },
+
+  videoStatus: (jobId) =>
+    http.get(`/models/video/${encodeURIComponent(jobId)}`).then((r) => r.data.job),
+
+  stopVideo: (jobId) =>
+    http.post(`/models/video/${encodeURIComponent(jobId)}/stop`).then((r) => r.data.job),
+
   /** Every model this installation has trained, newest first. */
   listTrainedModels: () => http.get('/models').then((r) => r.data.models || []),
 

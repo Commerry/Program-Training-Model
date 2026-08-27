@@ -31,6 +31,23 @@
       <!-- ── Left: Config panel ── -->
       <aside class="config-card">
 
+        <!-- What to run the model over -->
+        <div class="mode-tabs" role="tablist">
+          <button
+            v-for="option in MODES"
+            :key="option.id"
+            type="button"
+            role="tab"
+            class="mode-tab"
+            :class="{ 'mode-tab--on': mode === option.id }"
+            :aria-selected="mode === option.id"
+            @click="setMode(option.id)"
+          >
+            <Icon :name="option.icon" size="sm" />
+            <span>{{ option.label }}</span>
+          </button>
+        </div>
+
         <!-- Step 1: model -->
         <div class="step-block">
           <div class="step-head">
@@ -125,8 +142,8 @@
           </div>
         </div>
 
-        <!-- Step 4: images -->
-        <div class="step-block">
+        <!-- Step 4: what to detect in -->
+        <div v-if="mode === 'images'" class="step-block">
           <div class="step-head">
             <div class="step-num">4</div>
             <span>เลือกรูปที่จะทดสอบ</span>
@@ -160,17 +177,119 @@
           </div>
         </div>
 
+        <!-- Step 4, video -->
+        <div v-else-if="mode === 'video'" class="step-block">
+          <div class="step-head">
+            <div class="step-num">4</div>
+            <span>เลือกวิดีโอ</span>
+          </div>
+          <label
+            class="drop-zone"
+            :class="{ 'drop-zone--active': videoFile }"
+            @dragover.prevent
+            @drop.prevent="onVideoDrop"
+          >
+            <input ref="videoInput" type="file" accept="video/*" class="hidden-input" @change="onVideoChange" />
+            <div v-if="!videoFile" class="dz-inner">
+              <Icon name="video" size="lg" />
+              <span class="dz-title">คลิก หรือ ลากวิดีโอมาวาง</span>
+              <span class="dz-hint">mp4 / mov / avi / mkv / webm</span>
+            </div>
+            <div v-else class="dz-chosen">
+              <div class="chosen-icon"><Icon name="video" size="md" /></div>
+              <div class="chosen-info">
+                <div class="chosen-name">{{ videoFile.name }}</div>
+                <div class="chosen-size">{{ (videoFile.size / 1048576).toFixed(1) }} MB</div>
+              </div>
+              <button class="chosen-remove" @click.prevent="clearVideo">
+                <Icon name="x" size="sm" />
+              </button>
+            </div>
+          </label>
+
+          <label class="sample-row">
+            <span>ตรวจจับกี่เฟรมต่อวินาที</span>
+            <input v-model.number="sampleFps" type="range" min="1" max="15" step="1" class="styled-slider" />
+            <strong>{{ sampleFps }}</strong>
+          </label>
+          <p class="field-note">
+            ยิ่งสูงยิ่งละเอียดแต่ใช้เวลานานขึ้น ระบบคืนพิกัดกรอบต่อเฟรม
+            แล้ววาดทับวิดีโอที่เล่นในเครื่องคุณ ไม่ต้องส่งวิดีโอกลับ
+          </p>
+        </div>
+
+        <!-- Step 4, webcam -->
+        <div v-else class="step-block">
+          <div class="step-head">
+            <div class="step-num">4</div>
+            <span>กล้อง</span>
+          </div>
+
+          <div v-if="!cameraSupported" class="error-box">
+            <Icon name="alert-triangle" size="sm" />
+            <span>
+              เบราว์เซอร์เปิดกล้องได้เฉพาะหน้าเว็บที่เป็น https หรือ localhost
+              เท่านั้น ตอนนี้เปิดผ่าน <code>{{ pageOrigin }}</code>
+              ให้เปิดที่เครื่องที่รันเซิร์ฟเวอร์ด้วย
+              <code>http://localhost:{{ pagePort }}</code> แทน
+            </span>
+          </div>
+
+          <template v-else>
+            <select v-if="cameras.length > 1" v-model="cameraId" class="field-select">
+              <option v-for="cam in cameras" :key="cam.deviceId" :value="cam.deviceId">
+                {{ cam.label || 'กล้อง' }}
+              </option>
+            </select>
+            <label class="sample-row">
+              <span>ตรวจจับกี่ครั้งต่อวินาที</span>
+              <input v-model.number="liveFps" type="range" min="1" max="15" step="1" class="styled-slider" />
+              <strong>{{ liveFps }}</strong>
+            </label>
+            <p v-if="liveStats.fps" class="field-note">
+              กำลังทำได้จริง {{ liveStats.fps.toFixed(1) }} fps
+              ({{ liveStats.ms }} ms ต่อเฟรม)
+            </p>
+          </template>
+        </div>
+
         <!-- Run button -->
-        <button class="run-btn" :class="{ 'run-btn--loading': loading }" :disabled="!canTest || loading" @click="runTest">
+        <button
+          v-if="mode !== 'webcam'"
+          class="run-btn"
+          :class="{ 'run-btn--loading': loading }"
+          :disabled="!canTest || loading"
+          @click="runTest"
+        >
           <span v-if="!loading" class="run-inner">
             <Icon name="zap" size="sm" />
-            ทดสอบโมเดล
+            {{ mode === 'video' ? 'วิเคราะห์วิดีโอ' : 'ทดสอบโมเดล' }}
           </span>
           <span v-else class="run-inner">
             <span class="spinner"></span>
-            กำลังประมวลผล…
+            {{ videoJob && videoJob.status === 'running'
+              ? `${videoJob.frames_done} เฟรม…` : 'กำลังประมวลผล…' }}
           </span>
         </button>
+
+        <button
+          v-else
+          class="run-btn"
+          :class="{ 'run-btn--loading': cameraOn }"
+          :disabled="!chosenModel || !cameraSupported"
+          @click="cameraOn ? stopCamera() : startCamera()"
+        >
+          <span class="run-inner">
+            <Icon :name="cameraOn ? 'x' : 'video'" size="sm" />
+            {{ cameraOn ? 'หยุดกล้อง' : 'เปิดกล้อง' }}
+          </span>
+        </button>
+
+        <button
+          v-if="mode === 'video' && videoJob && videoJob.status === 'running'"
+          class="link-btn stop-link"
+          @click="stopVideoJob"
+        >หยุดการวิเคราะห์</button>
 
         <div v-if="error" class="error-box">
           <Icon name="x" size="sm" />
@@ -181,8 +300,65 @@
       <!-- ── Right: Results ── -->
       <main class="result-area">
 
+        <!-- Webcam feed -->
+        <div v-if="mode === 'webcam'" class="live-panel">
+          <div class="live-stage">
+            <video ref="cameraVideo" class="live-video" autoplay playsinline muted></video>
+            <DetectionOverlay
+              :width="liveSize.width"
+              :height="liveSize.height"
+              :detections="liveDetections"
+            />
+            <div v-if="!cameraOn" class="live-idle">
+              <Icon name="video" size="xl" />
+              <p>กด <strong>เปิดกล้อง</strong> เพื่อเริ่มตรวจจับสด</p>
+            </div>
+          </div>
+          <div v-if="cameraOn" class="live-bar">
+            <span>พบ <strong>{{ liveDetections.length }}</strong> วัตถุ</span>
+            <span v-for="(count, label) in liveTally" :key="label" class="chip chip-purple">
+              {{ label }} × {{ count }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Video with the boxes drawn over it -->
+        <div v-else-if="mode === 'video' && videoUrl" class="live-panel">
+          <div class="live-stage">
+            <video
+              ref="playbackVideo"
+              class="live-video"
+              :src="videoUrl"
+              controls
+              playsinline
+              @loadedmetadata="onPlaybackReady"
+              @timeupdate="syncPlaybackBoxes"
+              @seeked="syncPlaybackBoxes"
+            ></video>
+            <DetectionOverlay
+              :width="videoSize.width"
+              :height="videoSize.height"
+              :detections="playbackDetections"
+            />
+          </div>
+          <div v-if="videoJob" class="live-bar">
+            <span v-if="videoJob.status === 'running'">
+              วิเคราะห์แล้ว {{ videoJob.frames_done }} เฟรม…
+            </span>
+            <template v-else>
+              <span>{{ videoJob.frames_total }} เฟรม</span>
+              <span>พบรวม <strong>{{ videoJob.detection_count }}</strong> วัตถุ</span>
+              <span>ใช้เวลา {{ videoJob.elapsed_s }}s</span>
+              <span v-if="playbackDetections.length" class="chip chip-green">
+                ตอนนี้ {{ playbackDetections.length }} วัตถุ
+              </span>
+            </template>
+          </div>
+          <p v-if="videoJob && videoJob.message" class="field-note">{{ videoJob.message }}</p>
+        </div>
+
         <!-- Empty state -->
-        <div v-if="!results.length && !loading" class="empty-state">
+        <div v-else-if="!results.length && !loading" class="empty-state">
           <div class="empty-icon">
             <Icon name="search" size="xl" />
           </div>
@@ -255,8 +431,9 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
+import DetectionOverlay from '@/components/DetectionOverlay.vue'
 import { errorMessage, trainingService } from '@/services'
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -276,8 +453,55 @@ const EMPTY_STEPS = [
 ]
 
 // ── State ────────────────────────────────────────────────────────────
+const MODES = [
+  { id: 'images', label: 'รูปภาพ', icon: 'image' },
+  { id: 'video',  label: 'วิดีโอ', icon: 'video' },
+  { id: 'webcam', label: 'กล้อง',  icon: 'camera' },
+]
+const mode = ref('images')
+
 const modelFile     = ref(null)
 const modelInput    = ref(null)
+
+// ── Video ──────────────────────────────────────────────────────────────────
+// The analysed video is never sent back. The server returns boxes per sampled
+// frame and the browser plays the file the user already chose, drawing over
+// it. Writing H.264 from OpenCV depends on a codec library that is not
+// reliably present, so a server that returned video would work on one install
+// and produce something unplayable on the next.
+const videoFile          = ref(null)
+const videoInput         = ref(null)
+const videoUrl           = ref('')
+const videoJob           = ref(null)
+const videoSize          = ref({ width: 0, height: 0 })
+const playbackVideo      = ref(null)
+const playbackDetections = ref([])
+const sampleFps          = ref(5)
+let videoPoll = null
+
+// ── Webcam ─────────────────────────────────────────────────────────────────
+const cameraVideo    = ref(null)
+const cameraOn       = ref(false)
+const cameraId       = ref('')
+const cameras        = ref([])
+const liveDetections = ref([])
+const liveSize       = ref({ width: 0, height: 0 })
+const liveFps        = ref(6)
+const liveStats      = ref({ fps: 0, ms: 0 })
+let cameraStream = null
+let liveTimer = null
+let liveBusy = false
+
+// getUserMedia only exists in a secure context: https, or localhost. Opening
+// the app from another machine over plain http gives no camera at all, and the
+// browser reports that as the API simply being absent, so it is worth saying
+// what is actually wrong rather than letting the button do nothing.
+const cameraSupported = computed(() =>
+  typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia)
+const pageOrigin = computed(() =>
+  typeof window !== 'undefined' ? window.location.origin : '')
+const pagePort = computed(() =>
+  typeof window !== 'undefined' ? (window.location.port || '80') : '')
 // Models this server has already produced. Uploading best.pt back to the
 // machine that just wrote it was the only way to try a freshly trained model.
 const trainedModels = ref([])
@@ -295,7 +519,23 @@ const resolvedLabelSource = ref('')
 
 // ── Computed ─────────────────────────────────────────────────────────
 const chosenModel   = computed(() => pickedModel.value || modelFile.value)
-const canTest       = computed(() => !!chosenModel.value && imageFiles.value.length > 0)
+const canTest       = computed(() => {
+  if (!chosenModel.value) return false
+  if (mode.value === 'video') {
+    // Only a model this server trained: the analysis outlives the request that
+    // starts it, so an uploaded copy would be gone before the worker read it.
+    return !!videoFile.value && !!pickedModel.value?.path
+  }
+  return imageFiles.value.length > 0
+})
+
+const liveTally = computed(() => {
+  const counts = {}
+  for (const d of liveDetections.value) {
+    counts[d.label_name] = (counts[d.label_name] || 0) + 1
+  }
+  return counts
+})
 const thresholdPct  = computed(() => ((scoreThreshold.value - 0.1) / 0.85) * 100)
 const totalDetections = computed(() => results.value.reduce((s, r) => s + r.detection_count, 0))
 
@@ -331,6 +571,208 @@ onMounted(async () => {
   }
 })
 
+const setMode = (next) => {
+  if (next === mode.value) return
+  stopCamera()
+  mode.value = next
+  error.value = ''
+}
+
+// ── Video ──────────────────────────────────────────────────────────────────
+const clearVideo = () => {
+  if (videoUrl.value) URL.revokeObjectURL(videoUrl.value)
+  videoUrl.value = ''
+  videoFile.value = null
+  videoJob.value = null
+  playbackDetections.value = []
+  videoSize.value = { width: 0, height: 0 }
+  if (videoPoll) { clearInterval(videoPoll); videoPoll = null }
+}
+
+const chooseVideo = (file) => {
+  clearVideo()
+  if (!file) return
+  videoFile.value = file
+  videoUrl.value = URL.createObjectURL(file)
+  error.value = ''
+}
+const onVideoChange = (e) => chooseVideo(e.target.files?.[0] || null)
+const onVideoDrop   = (e) => chooseVideo(e.dataTransfer.files?.[0] || null)
+
+const onPlaybackReady = () => {
+  const el = playbackVideo.value
+  if (el) videoSize.value = { width: el.videoWidth, height: el.videoHeight }
+}
+
+/**
+ * Show the boxes from the sampled frame nearest the playhead.
+ *
+ * Sampling is coarser than playback, so between samples the last known boxes
+ * stay on screen — which is what a viewer perceives anyway at these rates.
+ * Binary search rather than a scan: a long clip holds thousands of samples and
+ * this runs on every timeupdate.
+ */
+const syncPlaybackBoxes = () => {
+  const frames = videoJob.value?.frames
+  const el = playbackVideo.value
+  if (!frames?.length || !el) { playbackDetections.value = []; return }
+
+  const t = el.currentTime
+  let lo = 0
+  let hi = frames.length - 1
+  let best = 0
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (frames[mid].time_s <= t) { best = mid; lo = mid + 1 } else { hi = mid - 1 }
+  }
+  playbackDetections.value = frames[best].detections || []
+}
+
+const runVideo = async () => {
+  loading.value = true
+  error.value = ''
+  playbackDetections.value = []
+  try {
+    videoJob.value = await trainingService.analyseVideo(
+      pickedModel.value, videoFile.value,
+      {
+        scoreThreshold: scoreThreshold.value,
+        labelNames: labelNames.value,
+        sampleFps: sampleFps.value,
+      })
+    videoPoll = setInterval(async () => {
+      try {
+        const job = await trainingService.videoStatus(videoJob.value.id)
+        videoJob.value = job
+        if (job.status !== 'running') {
+          clearInterval(videoPoll)
+          videoPoll = null
+          loading.value = false
+          if (job.status === 'failed') error.value = job.message
+          if (Array.isArray(job.label_names) && job.label_names.length && !labelNames.value) {
+            labelNames.value = job.label_names.join(', ')
+          }
+          syncPlaybackBoxes()
+        }
+      } catch (err) {
+        clearInterval(videoPoll)
+        videoPoll = null
+        loading.value = false
+        error.value = errorMessage(err, 'ติดตามงานวิเคราะห์วิดีโอไม่ได้')
+      }
+    }, 1000)
+  } catch (err) {
+    loading.value = false
+    error.value = errorMessage(err, 'วิเคราะห์วิดีโอไม่สำเร็จ')
+  }
+}
+
+const stopVideoJob = async () => {
+  if (!videoJob.value?.id) return
+  try {
+    await trainingService.stopVideo(videoJob.value.id)
+  } catch (err) {
+    error.value = errorMessage(err)
+  }
+}
+
+// ── Webcam ─────────────────────────────────────────────────────────────────
+const startCamera = async () => {
+  if (!cameraSupported.value || !chosenModel.value) return
+  error.value = ''
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: cameraId.value
+        ? { deviceId: { exact: cameraId.value } }
+        : { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    })
+    const el = cameraVideo.value
+    el.srcObject = cameraStream
+    await el.play()
+    liveSize.value = { width: el.videoWidth, height: el.videoHeight }
+    cameraOn.value = true
+
+    // Labels only become readable once permission has been granted, so the
+    // list is worth refreshing here rather than on mount.
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      cameras.value = devices.filter((d) => d.kind === 'videoinput')
+    } catch { /* listing cameras is a convenience, not a requirement */ }
+
+    scheduleFrame()
+  } catch (err) {
+    error.value = err?.name === 'NotAllowedError'
+      ? 'เบราว์เซอร์ไม่อนุญาตให้ใช้กล้อง กดอนุญาตที่แถบที่อยู่แล้วลองใหม่'
+      : `เปิดกล้องไม่ได้: ${err?.message || err}`
+  }
+}
+
+const stopCamera = () => {
+  cameraOn.value = false
+  if (liveTimer) { clearTimeout(liveTimer); liveTimer = null }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop())
+    cameraStream = null
+  }
+  if (cameraVideo.value) cameraVideo.value.srcObject = null
+  liveDetections.value = []
+  liveStats.value = { fps: 0, ms: 0 }
+}
+
+const scheduleFrame = () => {
+  if (!cameraOn.value) return
+  liveTimer = setTimeout(grabFrame, Math.round(1000 / liveFps.value))
+}
+
+/**
+ * Send one frame and draw what comes back.
+ *
+ * Only ever one request in flight. Firing on a timer regardless would queue
+ * requests behind each other the moment inference is slower than the interval,
+ * and the feed would fall further behind the longer it ran.
+ */
+const grabFrame = async () => {
+  if (!cameraOn.value || liveBusy) { scheduleFrame(); return }
+  const el = cameraVideo.value
+  if (!el || !el.videoWidth) { scheduleFrame(); return }
+
+  liveBusy = true
+  const started = performance.now()
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = el.videoWidth
+    canvas.height = el.videoHeight
+    canvas.getContext('2d').drawImage(el, 0, 0)
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.8))
+
+    if (blob && cameraOn.value) {
+      const res = await trainingService.detectFrame(chosenModel.value, blob, {
+        scoreThreshold: scoreThreshold.value,
+        labelNames: labelNames.value,
+      })
+      liveDetections.value = res.detections || []
+      liveSize.value = { width: res.width, height: res.height }
+      if (!labelNames.value && res.label_names?.length) {
+        labelNames.value = res.label_names.join(', ')
+      }
+      const ms = performance.now() - started
+      liveStats.value = { fps: 1000 / ms, ms: Math.round(ms) }
+    }
+  } catch (err) {
+    error.value = errorMessage(err, 'ตรวจจับเฟรมไม่สำเร็จ')
+    stopCamera()
+    return
+  } finally {
+    liveBusy = false
+  }
+  scheduleFrame()
+}
+
+// Changing the model mid-feed would keep drawing the previous one's boxes.
+watch(chosenModel, () => { if (cameraOn.value) stopCamera() })
+
 const pickTrained = (model) => {
   pickedModel.value = pickedModel.value?.path === model.path ? null : model
   modelFile.value = null
@@ -361,11 +803,16 @@ const clearImages = () => {
 // when the page goes away.
 onBeforeUnmount(() => {
   previewUrls.value.forEach((url) => URL.revokeObjectURL(url))
+  // Leaving the page must release the camera. Without this the browser keeps
+  // showing the in-use indicator and the light stays on until the tab closes.
+  stopCamera()
+  clearVideo()
 })
 
 // ── Run inference ────────────────────────────────────────────────────
 const runTest = async () => {
   if (!canTest.value || loading.value) return
+  if (mode.value === 'video') { await runVideo(); return }
   loading.value = true
   error.value   = ''
   results.value = []
@@ -615,6 +1062,139 @@ const runTest = async () => {
   color:var(--text-secondary);
   font-size:0.78rem;
 }
+
+.mode-tabs {
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:0.3rem;
+  margin-bottom:1.1rem;
+  padding:0.3rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+}
+
+.mode-tab {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:0.4rem;
+  padding:0.5rem 0.4rem;
+  border:0;
+  border-radius:calc(var(--radius-md) - 2px);
+  background:transparent;
+  color:var(--text-secondary);
+  font:inherit;
+  font-size:0.86rem;
+  cursor:pointer;
+  transition:background var(--t) var(--ease), color var(--t) var(--ease);
+}
+
+.mode-tab:hover { color:var(--text-primary); }
+
+.mode-tab--on {
+  background:var(--accent);
+  color:var(--text-inverse);
+  font-weight:600;
+}
+
+.sample-row {
+  display:flex;
+  align-items:center;
+  gap:0.6rem;
+  margin-top:0.8rem;
+  color:var(--text-secondary);
+  font-size:0.86rem;
+}
+
+.sample-row .styled-slider { flex:1; }
+.sample-row strong { color:var(--text-primary); min-width:1.6rem; text-align:right; }
+
+.field-note {
+  margin:0.5rem 0 0 0;
+  color:var(--text-tertiary);
+  font-size:0.8rem;
+  line-height:1.55;
+}
+
+.field-note code,
+.error-box code {
+  padding:0.05rem 0.3rem;
+  border-radius:4px;
+  background:var(--surface-3);
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:0.92em;
+}
+
+.field-select {
+  width:100%;
+  margin-top:0.6rem;
+  padding:0.5rem 0.6rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+  color:var(--text-primary);
+  font:inherit;
+}
+
+.stop-link {
+  display:block;
+  margin:0.6rem auto 0;
+}
+
+/* ── Live stage, shared by the video and webcam views ────────────────── */
+.live-panel {
+  display:flex;
+  flex-direction:column;
+  gap:0.8rem;
+}
+
+.live-stage {
+  position:relative;
+  width:100%;
+  aspect-ratio:16 / 9;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-lg);
+  background:#05060a;
+  overflow:hidden;
+}
+
+.live-video {
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  display:block;
+}
+
+.live-idle {
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:0.7rem;
+  color:var(--text-tertiary);
+  text-align:center;
+}
+
+.live-idle p { margin:0; }
+
+.live-bar {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:0.5rem 1rem;
+  padding:0.6rem 0.9rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+  color:var(--text-secondary);
+  font-size:0.86rem;
+}
+
+.live-bar strong { color:var(--text-primary); }
 
 .format-tags { display:flex; flex-wrap:wrap; gap:0.35rem; }
 .fmt-tag {

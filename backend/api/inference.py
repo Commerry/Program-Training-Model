@@ -1,9 +1,14 @@
 """Model testing and cross-project reporting endpoints."""
 
+import hashlib
+import tempfile
+from pathlib import Path
+
 from flask import Blueprint, request
 
 from api import login_required_api, ok
-from services import inference, projects, training
+from config import INSTANCE_DIR
+from services import inference, projects, training, videojob
 from services.projects import ProjectError
 
 inference_bp = Blueprint('inference', __name__)
@@ -12,18 +17,8 @@ inference_bp.before_request(login_required_api(lambda: None))
 
 @inference_bp.post('/models/test')
 def test_model():
-    labels_text = (request.form.get('label_names') or '').strip()
-    label_names = [part.strip() for part in labels_text.replace('\n', ',').split(',')
-                   if part.strip()]
-
-    # Parsed defensively: a non-numeric value used to raise straight out of
-    # int() as a 500 rather than a 400.
-    try:
-        img_size = int(request.form.get('img_size') or 640)
-    except (TypeError, ValueError):
-        raise ProjectError('img_size must be a number')
-    if not 64 <= img_size <= 4096:
-        raise ProjectError('img_size must be between 64 and 4096')
+    label_names = _label_names()
+    img_size = _img_size()
 
     # Either an uploaded weights file, or the path of one this server trained.
     # The path is resolved against the projects tree before it reaches the
@@ -39,6 +34,164 @@ def test_model():
         label_names=label_names,
         img_size=img_size,
     ))
+
+
+def _staged_model(upload):
+    """
+    Keep an uploaded model on disk under a name derived from its contents.
+
+    A webcam feed asks for a prediction several times a second, and the loaded
+    model is cached by file path, size and modification time. Writing each
+    upload to a fresh temporary file and deleting it would defeat that cache
+    entirely -- every frame would pay the load cost again -- and would leave
+    cache entries pointing at files that no longer exist. Naming the file after
+    the hash of its bytes means the same weights land on the same path every
+    time, so the second frame of a session is a cache hit, and different
+    weights can never collide on one name.
+    """
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in inference.SUPPORTED_SUFFIXES:
+        raise ProjectError('Supported model files: '
+                           f'{", ".join(sorted(inference.SUPPORTED_SUFFIXES))}')
+
+    staging = Path(INSTANCE_DIR) / 'uploaded-models'
+    staging.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha1()
+    with tempfile.NamedTemporaryFile(dir=str(staging), delete=False,
+                                     suffix=suffix) as tmp:
+        temp_path = Path(tmp.name)
+        while True:
+            chunk = upload.stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            tmp.write(chunk)
+
+    final = staging / f'{digest.hexdigest()}{suffix}'
+    if final.exists():
+        # Already staged by an earlier frame or an earlier session.
+        temp_path.unlink(missing_ok=True)
+    else:
+        try:
+            temp_path.replace(final)
+        except OSError:
+            # Another request staged the same weights between the check and
+            # the rename; theirs is identical, so use it.
+            temp_path.unlink(missing_ok=True)
+            if not final.exists():
+                raise
+
+    _prune_staging(staging)
+    return final
+
+
+def _prune_staging(staging, keep=4):
+    """Keep only the few most recently used uploads."""
+    try:
+        files = sorted((p for p in staging.iterdir() if p.is_file()),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    for stale in files[keep:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
+def _model_for_request():
+    """
+    The model a request names, whether by path or by upload.
+
+    A path is resolved against the projects tree before anything opens it, so
+    it cannot be pointed at an arbitrary file.
+    """
+    raw_path = (request.form.get('model_path') or '').strip()
+    if raw_path:
+        return training.resolve_trained_model(raw_path)
+
+    upload = request.files.get('model')
+    if upload is None or not upload.filename:
+        raise ProjectError('Select a model file, or pick one this server trained')
+    return _staged_model(upload)
+
+
+def _label_names():
+    text = (request.form.get('label_names') or '').strip()
+    return [part.strip() for part in text.replace('\n', ',').split(',') if part.strip()]
+
+
+def _img_size():
+    try:
+        value = int(request.form.get('img_size') or 640)
+    except (TypeError, ValueError):
+        raise ProjectError('img_size must be a number')
+    if not 64 <= value <= 4096:
+        raise ProjectError('img_size must be between 64 and 4096')
+    return value
+
+
+@inference_bp.post('/models/detect')
+def detect_frame():
+    """
+    Boxes for a single frame, for a webcam feed.
+
+    Returns coordinates only. The page already has the pixels on screen, so
+    sending an annotated copy back would cost more than the prediction does
+    and would still arrive a frame late.
+    """
+    model_path = _model_for_request()
+    frame = inference.decode_frame(request.files.get('frame')
+                                   or request.files.get('image'))
+    if frame is None:
+        raise ProjectError('That frame could not be read as an image')
+
+    detections, labels = inference.detect_frame(
+        model_path, frame,
+        score_threshold=request.form.get('score_threshold', 0.5),
+        label_names=_label_names(),
+        img_size=_img_size())
+    return ok({
+        'detections': detections,
+        'detection_count': len(detections),
+        'label_names': labels,
+        'width': int(frame.shape[1]),
+        'height': int(frame.shape[0]),
+    })
+
+
+@inference_bp.post('/models/video')
+def start_video():
+    """Begin analysing an uploaded video. Returns straight away."""
+    # An upload cannot be used here: the analysis outlives the request, and the
+    # temporary file would be gone before the worker read it.
+    raw_path = (request.form.get('model_path') or '').strip()
+    if not raw_path:
+        raise ProjectError('Pick a model this server trained to analyse a video')
+    model_path = training.resolve_trained_model(raw_path)
+
+    return ok({'job': videojob.start(
+        model_path,
+        request.files.get('video'),
+        score_threshold=request.form.get('score_threshold', 0.5),
+        label_names=_label_names(),
+        img_size=_img_size(),
+        sample_fps=request.form.get('sample_fps', videojob.DEFAULT_SAMPLE_FPS),
+    )})
+
+
+@inference_bp.get('/models/video/<job_id>')
+def video_status(job_id):
+    job = videojob.get(job_id)
+    if job is None:
+        raise ProjectError('No such video job', status=404)
+    return ok({'job': job})
+
+
+@inference_bp.post('/models/video/<job_id>/stop')
+def video_stop(job_id):
+    return ok({'job': videojob.stop(job_id)})
 
 
 @inference_bp.get('/models')

@@ -248,6 +248,51 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Testing a model: images, video, or the camera
+
+The model test screen runs a model three ways. All three take the same model,
+threshold and class names; only the source differs.
+
+**Images** — pick some files, get them back annotated.
+
+**Video** — pick a clip and the server samples it (five frames a second by
+default) and returns what it found at each instant. The clip itself is never
+sent back: the browser plays the file you already chose and draws the boxes
+over it, scrubbing included. That is not only cheaper, it is the only version
+that works everywhere. Writing H.264 from OpenCV needs an openh264 library that
+is not reliably installed — on the machine this was built on the mp4 writer
+reported "Incorrect library version loaded" and produced a file no browser
+would accept — so a server that returned an annotated video would work on one
+install and silently fail on the next. The cost is that there is no annotated
+file to download afterwards.
+
+**Camera** — the page grabs a frame, sends it, draws the boxes, and repeats.
+Measured here: 22 frames a second against a small YOLO on a CPU. Only one
+request is ever in flight; firing on a timer regardless would queue requests
+behind each other the moment inference is slower than the interval and the feed
+would fall further behind the longer it ran.
+
+Two things are worth knowing about the camera:
+
+- **It needs https or localhost.** `getUserMedia` is only available in a secure
+  context, so opening the app from another machine over plain http gives no
+  camera at all. Browsers report that as the API simply being absent, so the
+  page says so rather than leaving a button that does nothing. Use the machine
+  running the server, at `http://localhost:<port>`.
+- **The model is kept in memory between frames.** Loading a small YOLO costs
+  131 ms against 40 ms to predict, so reloading per frame would cap the feed
+  near 6 fps. Models are cached by path, size and modification time, so
+  retraining into the same filename is noticed rather than served stale, and an
+  uploaded model is stored under the hash of its contents so repeated frames
+  from one session hit the same entry.
+
+A model is also run at the size it was built for rather than at the screen's
+default. An ONNX export has its resolution compiled into the graph: asking a
+320-export for 640 raised `Got invalid dimensions for input: images` from
+onnxruntime and reached the browser as an opaque 500. A `.pt` records what it
+was trained at, and honouring that matters too — a model trained at 320 and run
+at 640 detects far less, with nothing on screen to say why.
+
 ## Why the earlier runs were wasted
 
 Two independent faults, both now fixed. `python backend/scripts/why_old_runs_failed.py`
@@ -401,6 +446,7 @@ python backend/tests/test_autolabel.py           # trains a model, then labels w
 python backend/tests/test_augment.py             # the colour filters, and the boxes
                                                  #   they must not move
 python backend/tests/test_train_end_to_end.py    # a real run, then detection with it
+python backend/tests/test_video_webcam.py        # one frame at a time, and a video
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 
@@ -426,7 +472,12 @@ writes weights, and fails exactly that last check.
 ```bash
 python backend/app.py                                       # in one terminal
 node frontend/tests/browser-walkthrough.mjs http://127.0.0.1:64031
+node frontend/tests/browser-live.mjs http://127.0.0.1:64031 clip.webm
 ```
+
+`browser-live.mjs` drives the camera and video modes, launching Chromium with a
+fake camera so it runs unattended. The clip argument is optional; use webm/VP8,
+the one container both Chromium and this OpenCV build handle.
 
 This drives the real application in Chromium: every page, every console error,
 every failed request, plus the ROI overlays, the annotate screen, the text

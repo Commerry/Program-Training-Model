@@ -38,6 +38,8 @@ SUITES = [
      'the colour filters and the boxes they must not move'),
     ('end to end', TESTS / 'test_train_end_to_end.py', True,
      'a real training run, then detecting with the model it produced'),
+    ('live detection', TESTS / 'test_video_webcam.py', True,
+     'one frame at a time for a webcam, and a whole video'),
 ]
 
 
