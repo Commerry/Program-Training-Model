@@ -103,6 +103,41 @@ python backend/app.py                    # terminal 1 — API on :64031
 cd frontend && npm run dev               # terminal 2 — UI on :64030
 ```
 
+### Updating
+
+```powershell
+.\start.ps1 -Update        # Windows
+```
+
+```bash
+./start.sh --update        # Linux
+```
+
+One command, because doing it by hand is four steps in an order that fails
+quietly when you get it wrong. A server still bound to the port keeps serving
+the old code, so endpoints the update added answer 404 from the process that is
+still running; and the backend serves `frontend/dist` rather than
+`frontend/src`, so skipping the rebuild leaves the browser on the previous
+interface while the API has already moved on.
+
+`-Update` stops whatever holds the ports, pulls, reinstalls only if
+`requirements.txt` or `package.json` actually changed, rebuilds the interface,
+and then carries on with whatever else was asked for -- so
+`.\start.ps1 -Update -Network` updates and then serves on one port.
+
+Your annotations are tracked on purpose, being work that cannot be regenerated,
+so boxes drawn since the last update show up as local changes and would
+otherwise stop the pull. They are set aside and put back around it, and if they
+cannot be restored automatically the update stops and says where to find them
+rather than pressing on.
+
+The first update on an older checkout has to be done by hand, since a launcher
+that predates this switch does not have it:
+
+```bash
+git pull && cd frontend && npm run build && cd ..
+```
+
 ### First run
 
 An `admin` account is created on a fresh database and its password is printed
