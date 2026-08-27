@@ -17,7 +17,8 @@ from datetime import datetime
 from pathlib import Path
 
 from config import BACKEND_ROOT, PROJECTS_ROOT, WEIGHTS_CACHE_DIR
-from services import dataset, projects
+from services import augment as augment_service
+from services import dataset, projects, trainaug
 from services.atomicio import read_json as _read_json_atomic, write_json
 from services.projects import ProjectError
 
@@ -337,8 +338,17 @@ def _validate_request(model_type, epochs, batch_size, img_size, learning_rate,
 
 
 def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
-          learning_rate=0.001, export_formats=None, model_name=''):
-    """Prepare the dataset and launch a training worker in the background."""
+          learning_rate=0.001, export_formats=None, model_name='',
+          augmentation=None, generate_filters=None):
+    """
+    Prepare the dataset and launch a training worker in the background.
+
+    `augmentation` overrides the per-epoch settings the trainer uses; anything
+    not given falls back to what services/trainaug.py recommends from the
+    project's own class names. `generate_filters` asks for filtered copies of
+    the annotated images to be written first, and is a list of preset names or
+    True for the default set.
+    """
     projects.get_project(name)
     lock = _project_lock(name)
     # Non-blocking: a second start should be told the first one is already
@@ -347,13 +357,15 @@ def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
         raise ProjectError('A training run is already being started for this project')
     try:
         return _start_locked(name, model_type, epochs, batch_size, img_size,
-                             learning_rate, export_formats, model_name)
+                             learning_rate, export_formats, model_name,
+                             augmentation, generate_filters)
     finally:
         lock.release()
 
 
 def _start_locked(name, model_type, epochs, batch_size, img_size,
-                  learning_rate, export_formats, model_name):
+                  learning_rate, export_formats, model_name,
+                  augmentation=None, generate_filters=None):
 
     epochs, batch_size, img_size, learning_rate, export_formats = _validate_request(
         model_type, epochs, batch_size, img_size, learning_rate, export_formats
@@ -392,11 +404,38 @@ def _start_locked(name, model_type, epochs, batch_size, img_size,
             'Choose a different name so its weights are not overwritten.'
         )
 
+    # Filtered copies are written before the split is built, so the new images
+    # are part of the dataset rather than a separate pass. Grouping by source
+    # keeps every copy of one photograph on the same side of the train/val
+    # line, so a variant of a training image can never appear in validation.
+    filter_report = None
+    if generate_filters:
+        presets = (trainaug.DEFAULT_PRESETS if generate_filters is True
+                   else [t for t in generate_filters
+                         if t in augment_service.ALL_COLOR_TONES])
+        if presets:
+            filter_report = augment_service.augment_color_images(
+                name, tones=presets, variants_per_tone=1,
+                require_all_annotated=False)
+            summary = projects.dataset_summary(name)
+
     report = dataset.build_yolo_dataset(name)
+
+    # What the trainer will do to each image every epoch. Left to ultralytics'
+    # own defaults this mirrors half of them, which is wrong for any class that
+    # reads as text -- see services/trainaug.py.
+    advice = trainaug.recommend(name)
+    settings = dict(advice['settings'])
+    settings.update(trainaug.sanitise(augmentation))
 
     config = {
         'project_name': name,
         'model_name': model_name,
+        'augmentation': settings,
+        'augmentation_reasons': advice['reasons'],
+        'orientation_sensitive': advice['orientation_sensitive'],
+        'generated_filters': (filter_report or {}).get('created_count', 0),
+        'generated_filter_presets': (filter_report or {}).get('tones', []),
         'model_type': model_type,
         'weights': _weights_path(model_type),
         'epochs': epochs,

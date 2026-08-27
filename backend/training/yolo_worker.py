@@ -172,6 +172,16 @@ def main():
         model.add_callback('on_fit_epoch_end', on_epoch_end)
 
         log('Starting training...')
+        # Augmentation is passed explicitly rather than left to ultralytics'
+        # defaults. Those defaults mirror half of every epoch (fliplr=0.5),
+        # which is right for most objects and wrong for any class that reads as
+        # text: a mirrored 2 is not a 2, and its label still says it is. What
+        # arrives here was decided from the project's own class names, and can
+        # be overridden from the training screen.
+        augmentation = config.get('augmentation') or {}
+        log(f'augmentation: {augmentation}' if augmentation
+            else 'augmentation: ultralytics defaults')
+
         model.train(
             data=str(data_yaml),
             epochs=epochs,
@@ -187,6 +197,7 @@ def main():
             plots=True,
             patience=max(20, epochs // 5),
             seed=42,
+            **augmentation,
         )
 
         run_dir = results_dir / model_name

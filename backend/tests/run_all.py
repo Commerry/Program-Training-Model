@@ -40,6 +40,8 @@ SUITES = [
      'a real training run, then detecting with the model it produced'),
     ('live detection', TESTS / 'test_video_webcam.py', True,
      'one frame at a time for a webcam, and a whole video'),
+    ('train augment', TESTS / 'test_train_augment.py', False,
+     'what training does to each image, and what it writes first'),
 ]
 
 

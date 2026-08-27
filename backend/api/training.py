@@ -3,7 +3,7 @@
 from flask import Blueprint, request, send_file
 
 from api import login_required_api, ok
-from services import training
+from services import trainaug, training
 from services.projects import ProjectError
 
 training_bp = Blueprint('training', __name__, url_prefix='/projects/<project_name>/training')
@@ -13,10 +13,14 @@ training_bp.before_request(login_required_api(lambda: None))
 @training_bp.get('/options')
 def options(project_name):
     """Model types and export formats the backend actually supports."""
+    # The augmentation advice comes with the options because it is decided
+    # from this project's class names, not from a global setting: whether
+    # mirroring is safe depends on whether the classes read as text.
     return ok({
         'model_types': training.MODEL_TYPES,
         'yolo_export_formats': sorted(training.YOLO_EXPORT_FORMATS),
         'frcnn_export_formats': sorted(training.FRCNN_EXPORT_FORMATS),
+        'augmentation': trainaug.recommend(project_name),
     })
 
 
@@ -32,6 +36,8 @@ def start(project_name):
         learning_rate=data.get('learning_rate', 0.01),
         export_formats=data.get('export_formats') or ['pt'],
         model_name=data.get('model_name', ''),
+        augmentation=data.get('augmentation'),
+        generate_filters=data.get('generate_filters'),
     ))
 
 

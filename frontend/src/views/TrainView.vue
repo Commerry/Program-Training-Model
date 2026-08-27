@@ -241,6 +241,64 @@
             </p>
           </div>
 
+          <div class="form-group">
+            <label class="form-label">Augmentation</label>
+
+            <div v-if="augAdvice" class="aug-panel">
+              <p v-for="(reason, i) in augAdvice.reasons" :key="i" class="aug-reason">
+                <Icon :name="i === 0 && augAdvice.orientation_sensitive
+                  ? 'alert-triangle' : 'check-circle'" size="sm" />
+                <span>{{ reason }}</span>
+              </p>
+
+              <label class="aug-toggle">
+                <input type="checkbox" v-model="mirrorImages" />
+                <span>
+                  พลิกภาพซ้าย-ขวาระหว่างเทรน
+                  <small>
+                    เปิดได้ถ้าวัตถุพลิกแล้วยังเป็นสิ่งเดิม
+                    ปิดไว้ถ้าคลาสเป็นตัวเลขหรือตัวอักษร
+                  </small>
+                </span>
+              </label>
+
+              <label class="aug-toggle">
+                <input type="checkbox" v-model="generateFilters" />
+                <span>
+                  สร้างภาพเพิ่มด้วยฟิลเตอร์ก่อนเทรน
+                  <small>
+                    เขียนไฟล์ภาพใหม่จากรูปที่ตีกรอบไว้ ใช้กรอบ ROI เดิม
+                    เหมาะเมื่อมีภาพน้อย
+                  </small>
+                </span>
+              </label>
+
+              <div v-if="generateFilters" class="aug-presets">
+                <label
+                  v-for="preset in augAdvice.available_presets"
+                  :key="preset"
+                  class="aug-preset"
+                >
+                  <input type="checkbox" :value="preset" v-model="chosenPresets" />
+                  <span>{{ preset }}</span>
+                </label>
+              </div>
+
+              <p v-if="generateFilters" class="form-hint">
+                {{ chosenPresets.length }} ฟิลเตอร์ ×
+                {{ augAdvice.annotated_images }} ภาพที่ตีกรอบ =
+                <strong>{{ chosenPresets.length * augAdvice.annotated_images }}</strong>
+                ภาพใหม่ แต่ละ epoch จะใช้เวลานานขึ้นตามจำนวนภาพ
+                ฟิลเตอร์ที่ทำให้วัตถุในกรอบหายไปจะถูกทิ้งอัตโนมัติ
+              </p>
+              <p v-else class="form-hint">
+                ระบบปรับสี ความสว่าง ตำแหน่งและขนาดให้ใหม่ทุก epoch อยู่แล้ว
+                โดยไม่กินพื้นที่ ตัวเลือกนี้ไว้สำหรับฟิลเตอร์เชิงโครงสร้าง
+                ที่การเทรนไม่ได้ทำให้ เช่น เส้นขอบและการแยกขาวดำ
+              </p>
+            </div>
+          </div>
+
           <p v-if="startError" class="error-message">{{ startError }}</p>
 
           <div v-if="datasetReport" class="dataset-report">
@@ -248,6 +306,9 @@
             <strong>{{ datasetReport.train_images }}</strong> training and
             <strong>{{ datasetReport.val_images }}</strong> validation images
             ({{ datasetReport.train_boxes }} / {{ datasetReport.val_boxes }} boxes).
+            <span v-if="datasetReport.held_back_count" class="held-back">
+              {{ datasetReport.held_back_reason }}
+            </span>
             <span v-if="datasetReport.empty_classes?.length" class="report-warn">
               No boxes for: {{ datasetReport.empty_classes.join(', ') }}.
             </span>
@@ -508,6 +569,31 @@ const trainingConfig = ref({
   export_formats: ['onnx']
 })
 
+// What the server recommends for this project, and why. Fetched rather than
+// assumed: whether mirroring is safe depends on whether the classes read as
+// text, which only the project's own class list can say.
+const augAdvice = ref(null)
+const mirrorImages = ref(false)
+const generateFilters = ref(false)
+const chosenPresets = ref([])
+
+const loadAugmentationAdvice = async () => {
+  try {
+    const options = await trainingService.options(projectName.value)
+    augAdvice.value = options.augmentation || null
+    if (augAdvice.value) {
+      mirrorImages.value = augAdvice.value.settings.fliplr > 0
+      chosenPresets.value = [...(augAdvice.value.suggested_presets || [])]
+      // Offered by default only where it would actually help: with plenty of
+      // images the per-epoch augmentation already has enough to vary.
+      generateFilters.value = augAdvice.value.annotated_images > 0
+        && augAdvice.value.annotated_images < 50
+    }
+  } catch {
+    augAdvice.value = null
+  }
+}
+
 const isYoloModel = computed(() => trainingConfig.value.model_type !== 'faster_rcnn')
 
 function onModelTypeChange() {
@@ -629,6 +715,7 @@ const progressPercent = computed(() => {
 onMounted(async () => {
   await loadProjectInfo()
   await loadDatasetSummary()
+  await loadAugmentationAdvice()
   await loadTrainingStatus()
   await loadModels()
 })
@@ -742,7 +829,11 @@ const startTraining = async () => {
   startError.value = null
   training.value = true
   try {
-    const res = await trainingService.start(projectName.value, trainingConfig.value)
+    const res = await trainingService.start(projectName.value, {
+      ...trainingConfig.value,
+      augmentation: { fliplr: mirrorImages.value ? 0.5 : 0.0 },
+      generate_filters: generateFilters.value ? chosenPresets.value : null,
+    })
     trainingStatus.value = res.config
     datasetReport.value = res.dataset
     startPolling()
@@ -1692,6 +1783,80 @@ const getTagStatusClass = (imageCount) => {
 }
 
 /* ── Export formats checkboxes ── */
+.aug-panel {
+  padding:0.9rem 1rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+}
+
+.aug-reason {
+  display:flex;
+  align-items:flex-start;
+  gap:0.5rem;
+  margin:0 0 0.6rem 0;
+  color:var(--text-secondary);
+  font-size:0.85rem;
+  line-height:1.6;
+}
+
+.aug-toggle {
+  display:flex;
+  align-items:flex-start;
+  gap:0.6rem;
+  padding:0.5rem 0;
+  cursor:pointer;
+}
+
+.aug-toggle input { margin-top:0.25rem; }
+
+.aug-toggle span {
+  display:flex;
+  flex-direction:column;
+  gap:0.15rem;
+  color:var(--text-primary);
+  font-size:0.9rem;
+}
+
+.aug-toggle small {
+  color:var(--text-tertiary);
+  font-size:0.78rem;
+  line-height:1.5;
+}
+
+.aug-presets {
+  display:flex;
+  flex-wrap:wrap;
+  gap:0.4rem;
+  margin:0.5rem 0 0.2rem 0;
+}
+
+.aug-preset {
+  display:flex;
+  align-items:center;
+  gap:0.35rem;
+  padding:0.3rem 0.6rem;
+  border:1px solid var(--border-color);
+  border-radius:999px;
+  background:var(--surface);
+  color:var(--text-secondary);
+  font-size:0.8rem;
+  font-family:var(--font-mono);
+  cursor:pointer;
+}
+
+.aug-preset:has(input:checked) {
+  border-color:var(--accent);
+  background:var(--accent-soft);
+  color:var(--text-primary);
+}
+
+.held-back {
+  display:block;
+  margin-top:0.4rem;
+  color:var(--warning-700);
+}
+
 .export-formats-grid {
   display:grid;
   grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));

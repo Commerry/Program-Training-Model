@@ -121,13 +121,21 @@ def build_yolo_dataset(name, seed=42):
     train_keys = set(group_keys[val_target:])
 
     split_entries = {'train': [], 'val': []}
+    held_back = []
     for key in group_keys:
         for entry in groups[key]:
             if key in train_keys:
                 split_entries['train'].append(entry)
             elif entry['augmented']:
-                # Validating on synthetic near-duplicates inflates the score,
-                # so augmented copies are dropped from the validation split.
+                # A generated copy of a validation image belongs in neither
+                # split. Training on it leaks the validation image into
+                # training, and validating on it scores the model against
+                # synthetic near-duplicates, which inflates the number.
+                #
+                # This used to happen silently: someone who generated thirty
+                # copies and got a dataset six images smaller than the folder
+                # had nothing to tell them where they went.
+                held_back.append(entry['filename'])
                 continue
             else:
                 split_entries['val'].append(entry)
@@ -252,6 +260,13 @@ def build_yolo_dataset(name, seed=42):
         'empty_classes': empty_classes,
         'skipped': skipped[:100],
         'skipped_count': len(skipped),
+        'held_back_count': len(held_back),
+        'held_back': held_back[:50],
+        'held_back_reason': (
+            f'{len(held_back)} generated copies were left out because their '
+            'source image is in the validation set: training on them would '
+            'leak it, and validating on them would flatter the score.'
+        ) if held_back else '',
     }
 
 

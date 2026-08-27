@@ -248,6 +248,43 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Augmentation: what happens automatically, and what you ask for
+
+Two different things go by that name here, and keeping them apart decides what
+is worth doing.
+
+**Every epoch, automatically.** The trainer varies each image as it reads it:
+hue, saturation, brightness, position, scale, and it erases a patch. This costs
+no disk and gives a fresh variant each epoch, which generalises better than any
+fixed set of files. It was already happening — nothing in this application
+passed ultralytics any settings, so it used its own defaults.
+
+One of those defaults was wrong for this tool's usual job. `fliplr=0.5` mirrors
+half of every epoch. Mirror a **2** and you have something that is not a 2,
+while the label riding along with it still says it is. A project whose classes
+are digits or letters was therefore being taught something false a share of the
+time. The run now decides from the project's own class list: mirroring is off
+when every class reads as a character or a number, on otherwise, and the
+training screen says which it chose and why. You can override it.
+
+**Before training, on request.** The screen offers to write filtered copies of
+the annotated images, reusing their boxes. Fifteen annotated photographs and
+six presets gives ninety images. Worth doing when you have few images; the
+count is shown before you start, because each copy makes every epoch longer.
+
+Only the presets that add something are offered. Brightness, colour and
+contrast are already applied fresh every epoch at no cost, so writing them out
+as files buys nothing and slows each epoch down. What is offered is the
+structural work the trainer does not do: CLAHE, adaptive thresholds,
+morphological top-hat and black-hat, edge maps, unsharp masking — the
+transformations that matter for characters stamped or engraved into metal.
+
+A generated image whose filter hid the annotated object is dropped rather than
+trained on, and copies of an image that landed in validation are held out of
+both splits: training on them would leak the validation image, and validating
+on them would flatter the score. Both are reported rather than left to be
+noticed as a shortfall in the image count.
+
 ## Testing a model: images, video, or the camera
 
 The model test screen runs a model three ways. All three take the same model,
@@ -447,6 +484,7 @@ python backend/tests/test_augment.py             # the colour filters, and the b
                                                  #   they must not move
 python backend/tests/test_train_end_to_end.py    # a real run, then detection with it
 python backend/tests/test_video_webcam.py        # one frame at a time, and a video
+python backend/tests/test_train_augment.py       # what a run does to each image
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 

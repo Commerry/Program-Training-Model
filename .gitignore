@@ -25,6 +25,12 @@ data/instance/secret_key
 data/weights/
 data/projects/*/images/
 data/projects/*/training/
+# Annotations for generated images are excluded while hand-drawn ones are kept.
+# The distinction is whether the work can be reproduced: a *_aug_* annotation is
+# a copy of its source's boxes written by the augmenter and can be regenerated
+# in seconds, so committing hundreds of them adds noise without protecting
+# anything.
+data/projects/*/annotations/*_aug_*
 data/projects/*/exports/
 data/projects/*/index.json
 
