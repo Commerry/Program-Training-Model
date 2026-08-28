@@ -296,21 +296,55 @@ looks exactly like a slow GPU and gives no hint of the real cause. If a run
 never reaches epoch 1, set it back to 0; that is the only failure it can cause.
 
 **Caching the decoded images in memory is deliberately not offered.** It looks
-like free speed and it is not. Trained twice on the same images with the same
-seed and epochs, differing only in that setting, both runs reported
-`mAP50 = 0.995`. Asked about ten images from the same generator that neither
-had seen:
+like free speed. On one dataset it reproducibly ruins the model instead.
+Trained twice each way on the same images with the same seed and epochs,
+differing only in that setting, all four runs reported `mAP50 = 0.995`. Asked
+about ten images from the same generator that none of them had seen:
 
 ```
-cache off  ->  0.29  0.21  0.16  0.21  0.15  0.27  0.19  0.09  0.33  0.20
-cache ram  ->  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01
+cache off  ->  3/10 above 0.25          (both repeats)
+cache ram  ->  0/10, every score 0.01   (both repeats)
 ```
 
-The cached run produces a model that predicts nothing while reporting a perfect
-score — the same failure this tool already shipped once, where a run completed,
-reported well, and left weights that detected nothing. It stays off. Passing
-`cache` explicitly still reaches it, for anyone who wants to re-measure on a
-newer ultralytics.
+It is not universal — on an easier set the cached run detected perfectly well.
+What makes it worth refusing anyway is that when it goes wrong it goes wrong
+silently, and the number that should warn you reads 0.995.
+
+That number misleads for a reason worth knowing: **mAP measures ranking, not
+usable confidence.** It integrates over all confidence levels, so a model that
+answers 0.01 everywhere while ranking the right boxes first scores near 1.0 and
+detects nothing at any threshold a person would use. Which is why every run now
+also checks itself at a practical threshold — see below.
+
+Passing `cache` explicitly still reaches it, for anyone re-measuring on a newer
+ultralytics.
+
+## Every run checks whether its own weights detect anything
+
+The application shipped once with training that completed, reported a falling
+loss, and produced a model that found nothing. The caching failure above is the
+same shape. In both cases every number the tool had said the run was fine.
+
+So a finished run now loads the weights it just wrote, points them at images
+from its own validation split, and records what came back:
+
+```
+Self-check: found 5 object(s) on 5/5 validation images (best 0.98).
+```
+
+or, for the cached run above, alongside its `mAP50 = 0.995`:
+
+```
+Self-check: found NOTHING on 4 validation images at 0.25. These weights will
+not detect anything as they are, whatever the metrics above say.
+```
+
+It proves nothing about accuracy — a model that detects is not necessarily a
+good one — but a model that detects nothing on the very images it was scored
+against is not usable, whatever the numbers say. The result is kept with the
+run and in the history, and `backend/tests/test_model_is_usable.py` checks both
+directions in about 90 seconds, which is short enough to run every time rather
+than only under `--full`.
 
 ## Annotating faster
 
@@ -606,6 +640,7 @@ python backend/tests/test_train_end_to_end.py    # a real run, then detection wi
 python backend/tests/test_video_webcam.py        # one frame at a time, and a video
 python backend/tests/test_train_augment.py       # what a run does to each image
 python backend/tests/test_reading_order.py       # detections in reading order
+python backend/tests/test_model_is_usable.py     # trained weights actually detect
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 

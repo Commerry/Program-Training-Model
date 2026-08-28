@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.worker_common import (  # noqa: E402
     append_history, describe_device, load_config, make_logger, quiet_environment,
-    read_config, stop_requested, update_status,
+    read_config, self_check, stop_requested, update_status,
 )
 
 quiet_environment()
@@ -251,6 +251,11 @@ def main():
         except Exception as exc:  # noqa: BLE001 - a failed val must not lose the weights
             log(f'Final validation failed (weights are still usable): {exc}')
 
+        # ── Does it actually detect anything? ────────────────────────────
+        # The metrics above can look perfect while the weights detect nothing;
+        # see worker_common.self_check for the run where that happened.
+        check = self_check(best_pt, config.get('dataset_path'), img_size, log)
+
         # ── Exports ──────────────────────────────────────────────────────
         exported = {'pt': str(best_pt)}
         if export_formats:
@@ -278,6 +283,7 @@ def main():
             'exported_models': exported,
             'metrics': final_metrics,
             'per_class': per_class,
+            'self_check': check,
             'pid': None,
             'error': None,
         })
@@ -296,6 +302,7 @@ def main():
             'val_images': config.get('val_images'),
             'metrics': final_metrics,
             'per_class': per_class,
+            'self_check': check,
             'best_model': str(best_pt),
             'exported_models': exported,
             'started_at': config.get('started_at'),

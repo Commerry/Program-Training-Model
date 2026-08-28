@@ -170,21 +170,30 @@ def sanitise(requested):
 # and 0 remains available if the deadlock ever returns.
 DEFAULT_WORKERS = 4
 
-# Holding the decoded images in memory is NOT offered, and that is a
-# measurement rather than caution.
+# Holding the decoded images in memory is NOT offered by default, and that is
+# a measurement rather than caution.
 #
-# Trained twice on the same 20 images with the same seed and epochs, differing
-# only in this setting, both runs reported mAP50 = 0.995. Asked about ten
-# images from the same generator that neither had seen:
+# On one dataset it reproducibly ruins the model. Trained twice each way on the
+# same 20 images with the same seed and epochs, differing only in this setting,
+# all four runs reported mAP50 = 0.995. Asked about ten images from the same
+# generator that none of them had seen:
 #
-#     cache off  ->  0.29, 0.21, 0.16, 0.21, 0.15, 0.27, 0.19, 0.09, 0.33, 0.20
-#     cache ram  ->  0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01
+#     cache off  ->  3/10 above 0.25   (both repeats)
+#     cache ram  ->  0/10 above 0.25, every score 0.01   (both repeats)
 #
-# The cached run produces a model that predicts nothing while reporting a
-# perfect score. That is the exact failure this application already shipped
-# once -- a run that completes, reports well, and yields weights that detect
-# nothing -- so the setting stays off. It remains reachable by passing cache
-# explicitly, for anyone who wants to re-measure it on a newer ultralytics.
+# It is not universal: on an easier set the cached run detected perfectly well.
+# What makes it worth refusing anyway is that when it does go wrong it goes
+# wrong silently, and the number that should warn you reads 0.995.
+#
+# That number is misleading for a reason worth knowing. mAP integrates over
+# confidence, so it measures whether the model RANKS the right boxes first, not
+# whether it is confident enough for anyone to use. A model that answers 0.01
+# everywhere but ranks perfectly scores near 1.0 and detects nothing at any
+# usable threshold. Which is why the run now also checks itself at a practical
+# threshold -- see training/worker_common.self_check.
+#
+# Passing cache explicitly still reaches it, for anyone re-measuring on a newer
+# ultralytics.
 CACHE_IS_SAFE = False
 
 

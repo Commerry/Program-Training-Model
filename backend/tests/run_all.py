@@ -44,6 +44,8 @@ SUITES = [
      'what training does to each image, and what it writes first'),
     ('reading order', TESTS / 'test_reading_order.py', False,
      'detections come back in the order a person reads them'),
+    ('model is usable', TESTS / 'test_model_is_usable.py', False,
+     'a finished run produces weights that actually detect'),
 ]
 
 

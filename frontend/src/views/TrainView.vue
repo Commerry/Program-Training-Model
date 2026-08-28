@@ -392,6 +392,27 @@
           </div>
         </div>
 
+        <!--
+          What the weights actually did when pointed at their own validation
+          images. A run can report a perfect mAP and detect nothing: mAP
+          measures ranking, not whether the confidences are usable.
+        -->
+        <div v-if="selfCheck" class="self-check" :class="{ 'self-check--bad': !selfCheck.usable }">
+          <Icon :name="selfCheck.usable ? 'check-circle' : 'alert-triangle'" size="sm" />
+          <span v-if="selfCheck.usable">
+            ตรวจสอบตัวเอง: เจอ {{ selfCheck.detections }} วัตถุ
+            บน {{ selfCheck.images_with_detections }}/{{ selfCheck.images_checked }}
+            ภาพ validation (สูงสุด {{ selfCheck.best_score }})
+          </span>
+          <span v-else>
+            <strong>โมเดลนี้ตรวจจับอะไรไม่ได้เลย</strong> —
+            ลองกับภาพ validation {{ selfCheck.images_checked }} ภาพของตัวเอง
+            ที่ threshold {{ selfCheck.threshold }} ไม่เจอสักชิ้น
+            ตัวเลข mAP ด้านบนวัดการ<em>จัดอันดับ</em> ไม่ได้วัดว่าความมั่นใจสูงพอใช้งาน
+            ถ้าภาพน้อยให้เพิ่มภาพและ epoch แล้วเทรนใหม่
+          </span>
+        </div>
+
         <!-- Completed: show exported formats only -->
         <div v-if="trainingStatus.status === 'completed'" class="complete-banner">
           <Icon name="check-circle" size="sm" />
@@ -686,6 +707,8 @@ const METRIC_LABELS = [
   ['train_cls_loss', 'Class loss', 'number'],
   ['lr', 'Learning rate', 'number']
 ]
+
+const selfCheck = computed(() => trainingStatus.value?.self_check || null)
 
 const displayMetrics = computed(() => {
   const metrics = trainingStatus.value?.metrics || {}
@@ -1766,6 +1789,26 @@ const getTagStatusClass = (imageCount) => {
   border-radius:9999px;
   transition:width 0.5s ease;
   box-shadow: var(--shadow);
+}
+
+.self-check {
+  display:flex;
+  align-items:flex-start;
+  gap:0.5rem;
+  margin:0.8rem 0;
+  padding:0.7rem 0.9rem;
+  border:1px solid var(--success-300);
+  border-radius:var(--radius-md);
+  background:var(--success-100);
+  color:var(--success-700);
+  font-size:0.86rem;
+  line-height:1.6;
+}
+
+.self-check--bad {
+  border-color:var(--danger-300);
+  background:var(--danger-100);
+  color:var(--danger-700);
 }
 
 .metrics-row {

@@ -132,3 +132,71 @@ def describe_device():
         total = torch.cuda.get_device_properties(index).total_memory / 1e9
         return str(index), f'CUDA:{index} {name} ({total:.1f} GB)'
     return 'cpu', 'CPU (no CUDA device found — training will be slow)'
+
+
+def self_check(model_path, dataset_path, img_size, log, sample=8, threshold=0.25):
+    """
+    Ask the finished model about images from its own validation split.
+
+    A run can report an excellent mAP and still produce weights that detect
+    nothing. It happened here: turning on the dataloader's in-memory cache gave
+    two runs the same mAP50 of 0.995, and one of them then scored 0.01 on every
+    held-out image. The metric that should have warned about it read as
+    perfect, so nothing downstream had any reason to doubt the weights until
+    somebody tried them by hand.
+
+    This is the cheapest possible guard against that whole class of failure:
+    load what was just written, point it at pictures it was scored on, and see
+    whether anything comes back. It proves nothing about accuracy -- a model
+    that detects is not necessarily a good one -- but a model that detects
+    nothing on the very images it was validated against is not usable, whatever
+    the numbers say.
+
+    Returns a dict recorded with the run, or None if the check could not run.
+    """
+    from pathlib import Path
+
+    val_dir = Path(dataset_path) / 'images' / 'val'
+    if not val_dir.is_dir():
+        return None
+    images = sorted(p for p in val_dir.iterdir()
+                    if p.suffix.lower() in {'.jpg', '.jpeg', '.png', '.bmp', '.webp'})
+    if not images:
+        return None
+    images = images[:max(1, int(sample))]
+
+    try:
+        from ultralytics import YOLO
+        model = YOLO(str(model_path))
+        found_on = 0
+        total = 0
+        best = 0.0
+        for path in images:
+            result = model.predict(str(path), imgsz=img_size, conf=threshold,
+                                   verbose=False)[0]
+            boxes = result.boxes
+            count = len(boxes) if boxes is not None else 0
+            if count:
+                found_on += 1
+                total += count
+                best = max(best, float(boxes.conf.max()))
+    except Exception as exc:  # noqa: BLE001 - a failed check must not lose the run
+        log(f'Self-check could not run (the weights are still there): {exc}')
+        return None
+
+    report = {
+        'images_checked': len(images),
+        'images_with_detections': found_on,
+        'detections': total,
+        'best_score': round(best, 4),
+        'threshold': threshold,
+        'usable': found_on > 0,
+    }
+    if found_on:
+        log(f'Self-check: found {total} object(s) on {found_on}/{len(images)} '
+            f'validation images (best {best:.2f}).')
+    else:
+        log(f'Self-check: found NOTHING on {len(images)} validation images at '
+            f'{threshold:.2f}. These weights will not detect anything as they '
+            'are, whatever the metrics above say.')
+    return report
