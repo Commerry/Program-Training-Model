@@ -94,6 +94,22 @@ def get_image_data(project_name, filename):
     return ok({'data': projects.get_image_data(project_name, filename)})
 
 
+@projects_bp.post('/<project_name>/images/delete')
+def delete_images(project_name):
+    """
+    Delete a list of images, or every generated copy.
+
+    A POST rather than a DELETE because the list of names goes in the body: a
+    few hundred filenames do not belong in a URL.
+    """
+    data = request.get_json(silent=True) or {}
+    return ok(projects.delete_images(
+        project_name,
+        filenames=data.get('filenames'),
+        only_generated=bool(data.get('only_generated')),
+    ))
+
+
 @projects_bp.delete('/<project_name>/images/<filename>')
 def delete_image(project_name, filename):
     return ok(projects.delete_image(project_name, filename))

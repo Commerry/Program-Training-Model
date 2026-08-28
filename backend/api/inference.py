@@ -1,10 +1,12 @@
 """Model testing and cross-project reporting endpoints."""
 
+import csv
 import hashlib
+import io
 import tempfile
 from pathlib import Path
 
-from flask import Blueprint, request
+from flask import Blueprint, Response, request
 
 from api import login_required_api, ok
 from config import INSTANCE_DIR
@@ -196,6 +198,53 @@ def video_status(job_id):
 @inference_bp.post('/models/video/<job_id>/stop')
 def video_stop(job_id):
     return ok({'job': videojob.stop(job_id)})
+
+
+@inference_bp.post('/models/video/<job_id>/csv')
+@inference_bp.get('/models/video/<job_id>/csv')
+def video_csv(job_id):
+    """
+    A finished video analysis as CSV, one row per detection.
+
+    The page shows the boxes over the clip, which answers "did it work". It
+    does not answer "what did it read at 12.4 seconds", and copying that out of
+    a browser is not a thing anyone should have to do. Rows carry the reading
+    of their frame as well as the individual box, so a spreadsheet can be
+    filtered either way.
+    """
+    job = videojob.get(job_id)
+    if job is None:
+        raise ProjectError('No such video job', status=404)
+    if job['status'] == 'running':
+        raise ProjectError('That analysis is still running')
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator='\n')
+    writer.writerow(['time_s', 'frame', 'reading', 'label', 'score',
+                     'x1', 'y1', 'x2', 'y2', 'line', 'position'])
+    for entry in job.get('frames') or []:
+        detections = entry.get('detections') or []
+        if not detections:
+            # A frame where nothing was found is a fact worth keeping: it is
+            # the difference between "not looked at" and "looked, saw nothing".
+            writer.writerow([entry.get('time_s'), entry.get('frame'),
+                             '', '', '', '', '', '', '', '', ''])
+            continue
+        for detection in detections:
+            box = detection.get('box') or [None] * 4
+            writer.writerow([
+                entry.get('time_s'), entry.get('frame'), entry.get('reading', ''),
+                detection.get('label_name'), detection.get('score'),
+                *box,
+                detection.get('line'), detection.get('position'),
+            ])
+
+    filename = Path(job.get('filename') or 'detections').stem + '_detections.csv'
+    return Response(
+        buffer.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )
 
 
 @inference_bp.get('/models')

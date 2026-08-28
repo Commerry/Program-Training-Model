@@ -80,6 +80,9 @@ export const trainingService = {
       .then((r) => r.data.job)
   },
 
+  /** URL for downloading a finished analysis as CSV. Followed by the browser. */
+  videoCsvUrl: (jobId) => `/api/models/video/${encodeURIComponent(jobId)}/csv`,
+
   videoStatus: (jobId) =>
     http.get(`/models/video/${encodeURIComponent(jobId)}`).then((r) => r.data.job),
 

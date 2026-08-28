@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from training.worker_common import (  # noqa: E402
     append_history, describe_device, load_config, make_logger, quiet_environment,
-    read_config, stop_requested, update_status,
+    read_config, self_check, stop_requested, update_status,
 )
 
 quiet_environment()
@@ -242,11 +242,40 @@ def main():
             name = classes[index] if 0 <= index < len(classes) else str(label_id)
             per_class[str(name)] = {'ap50': ap}
 
+        # ── Does it actually detect anything? ────────────────────────────
+        # Same guard as the YOLO worker: a run can report a good AP and still
+        # produce weights that find nothing at a threshold anyone would use.
+        # torchvision has nothing in common with ultralytics here, so the
+        # loading is supplied rather than assumed.
+        def _frcnn_scores(path):
+            import cv2
+            bgr = cv2.imread(str(path))
+            if bgr is None:
+                return []
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().div_(255.0)
+            checker.eval()
+            with torch.no_grad():
+                out = checker([tensor.to(device)])[0]
+            return [float(v) for v in out['scores'].cpu().numpy()]
+
+        check = None
+        try:
+            checker = create_model(num_classes=len(classes), img_size=img_size)
+            checker.load_state_dict(torch.load(str(best_path), map_location=device,
+                                               weights_only=True))
+            checker.to(device)
+            check = self_check(best_path, config.get('dataset_path'), img_size, log,
+                               predict=_frcnn_scores)
+        except Exception as exc:  # noqa: BLE001 - never lose a run over this
+            log(f'Self-check could not run (the weights are still there): {exc}')
+
         finished_at = datetime.now().isoformat()
         final_status = 'stopped' if stopped_early else 'completed'
         update_status(config_file, {
             'status': final_status,
             'completed_at': finished_at,
+            'self_check': check,
             'best_model': str(best_path),
             'run_dir': str(results_dir / model_name),
             'exported_models': exported,
@@ -270,6 +299,7 @@ def main():
             'val_images': len(val_names),
             'metrics': final_metrics,
             'per_class': per_class,
+            'self_check': check,
             'best_model': str(best_path),
             'exported_models': exported,
             'started_at': config.get('started_at'),

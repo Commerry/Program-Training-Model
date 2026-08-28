@@ -695,6 +695,65 @@ def delete_image(name, filename):
     return {'message': f'{filename} deleted'}
 
 
+def delete_images(name, filenames=None, only_generated=False):
+    """
+    Delete several images in one pass.
+
+    One at a time each delete rebuilt the counters and rewrote the index, which
+    on a large project makes clearing a few hundred generated copies slower
+    than generating them was. Here the removals happen first and the
+    bookkeeping once at the end.
+
+    `only_generated` deletes every filtered copy in the project, which is the
+    common case: a filter preset turned out to suit the data badly and the
+    hundred images it wrote are all in the way.
+    """
+    _require(name)
+
+    if only_generated:
+        targets = [entry['filename'] for entry in list_images(name)
+                   if entry.get('augmented')]
+    else:
+        targets = []
+        for filename in filenames or []:
+            # One bad name should not abort the batch; the caller is told what
+            # was refused rather than losing the whole request.
+            try:
+                targets.append(safe_filename(filename))
+            except ProjectError:
+                continue
+
+    folder = images_dir(name)
+    removed, failed = [], []
+    for filename in targets:
+        try:
+            _remove_with_retry(lambda f=filename: (folder / f).unlink(missing_ok=True),
+                               filename)
+            annotation_path(name, filename).unlink(missing_ok=True)
+            removed.append(filename)
+        except ProjectError as exc:
+            failed.append({'filename': filename, 'reason': exc.message})
+        except OSError as exc:
+            failed.append({'filename': filename, 'reason': str(exc)})
+
+    if removed:
+        # Cheaper than removing each entry in turn once the list is long.
+        rebuild_index(name)
+    summary = refresh_stats(name)
+
+    message = f'Deleted {len(removed)} image(s)'
+    if failed:
+        message += f'; {len(failed)} could not be removed'
+    return {
+        'message': message,
+        'deleted_count': len(removed),
+        'deleted': removed[:200],
+        'failed': failed[:50],
+        'total_images': summary.get('total_images'),
+        'annotated_images': summary.get('annotated_images'),
+    }
+
+
 # ── statistics ──────────────────────────────────────────────────────────────
 
 def refresh_stats(name):

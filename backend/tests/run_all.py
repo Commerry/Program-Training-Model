@@ -46,6 +46,8 @@ SUITES = [
      'detections come back in the order a person reads them'),
     ('model is usable', TESTS / 'test_model_is_usable.py', False,
      'a finished run produces weights that actually detect'),
+    ('bulk and export', TESTS / 'test_bulk_and_export.py', False,
+     'deleting many images at once, and a video analysis as CSV'),
 ]
 
 

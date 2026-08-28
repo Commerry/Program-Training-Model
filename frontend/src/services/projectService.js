@@ -47,6 +47,10 @@ export const projectService = {
   imageData: (name, filename) =>
     http.get(`${base(name)}/images/${encodeURIComponent(filename)}`).then((r) => r.data),
 
+  /** Delete a list of images, or every generated copy, in one request. */
+  deleteImages: (name, options) =>
+    http.post(`${base(name)}/images/delete`, options).then((r) => r.data),
+
   deleteImage: (name, filename) =>
     http.delete(`${base(name)}/images/${encodeURIComponent(filename)}`).then((r) => r.data),
 

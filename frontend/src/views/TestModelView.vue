@@ -354,6 +354,15 @@
               <span>{{ videoJob.frames_total }} เฟรม</span>
               <span>พบรวม <strong>{{ videoJob.detection_count }}</strong> วัตถุ</span>
               <span>ใช้เวลา {{ videoJob.elapsed_s }}s</span>
+              <a
+                v-if="videoJob.frames_total"
+                class="csv-link"
+                :href="csvUrl"
+                download
+              >
+                <Icon name="download" size="sm" />
+                <span>ดาวน์โหลด CSV</span>
+              </a>
               <span v-if="playbackReading" class="reading-chip">{{ playbackReading }}</span>
               <span v-if="playbackDetections.length" class="chip chip-green">
                 ตอนนี้ {{ playbackDetections.length }} วัตถุ
@@ -553,6 +562,11 @@ const readingOf = (detections) => {
   return Object.keys(lines).sort((a, b) => a - b)
     .map((k) => lines[k].join('')).join('\n')
 }
+
+// Served as a file rather than fetched: the browser saves it directly, and a
+// long analysis is a large string that has no reason to pass through here.
+const csvUrl = computed(() =>
+  videoJob.value?.id ? trainingService.videoCsvUrl(videoJob.value.id) : '')
 
 const liveReading = computed(() => readingOf(liveDetections.value))
 const playbackReading = computed(() => readingOf(playbackDetections.value))
@@ -1541,6 +1555,24 @@ const runTest = async () => {
   white-space:pre-line;
   user-select:text;
   cursor:text;
+}
+
+.csv-link {
+  display:inline-flex;
+  align-items:center;
+  gap:0.35rem;
+  padding:0.2rem 0.6rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface);
+  color:var(--text-secondary);
+  font-size:0.82rem;
+  text-decoration:none;
+}
+
+.csv-link:hover {
+  border-color:var(--accent);
+  color:var(--text-primary);
 }
 
 .reading-chip {

@@ -134,7 +134,8 @@ def describe_device():
     return 'cpu', 'CPU (no CUDA device found — training will be slow)'
 
 
-def self_check(model_path, dataset_path, img_size, log, sample=8, threshold=0.25):
+def self_check(model_path, dataset_path, img_size, log, sample=8, threshold=0.25,
+               predict=None):
     """
     Ask the finished model about images from its own validation split.
 
@@ -152,6 +153,10 @@ def self_check(model_path, dataset_path, img_size, log, sample=8, threshold=0.25
     nothing on the very images it was validated against is not usable, whatever
     the numbers say.
 
+    `predict` takes an image path and returns the confidence scores it found,
+    so each trainer can supply its own loader: ultralytics and torchvision have
+    nothing in common here. Omitted, an ultralytics model is assumed.
+
     Returns a dict recorded with the run, or None if the check could not run.
     """
     from pathlib import Path
@@ -166,20 +171,27 @@ def self_check(model_path, dataset_path, img_size, log, sample=8, threshold=0.25
     images = images[:max(1, int(sample))]
 
     try:
-        from ultralytics import YOLO
-        model = YOLO(str(model_path))
+        if predict is None:
+            from ultralytics import YOLO
+            model = YOLO(str(model_path))
+
+            def predict(path):
+                result = model.predict(str(path), imgsz=img_size, conf=threshold,
+                                       verbose=False)[0]
+                boxes = result.boxes
+                if boxes is None or not len(boxes):
+                    return []
+                return [float(v) for v in boxes.conf]
+
         found_on = 0
         total = 0
         best = 0.0
         for path in images:
-            result = model.predict(str(path), imgsz=img_size, conf=threshold,
-                                   verbose=False)[0]
-            boxes = result.boxes
-            count = len(boxes) if boxes is not None else 0
-            if count:
+            scores = [s for s in (predict(path) or []) if s >= threshold]
+            if scores:
                 found_on += 1
-                total += count
-                best = max(best, float(boxes.conf.max()))
+                total += len(scores)
+                best = max(best, max(scores))
     except Exception as exc:  # noqa: BLE001 - a failed check must not lose the run
         log(f'Self-check could not run (the weights are still there): {exc}')
         return None

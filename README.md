@@ -344,7 +344,9 @@ good one — but a model that detects nothing on the very images it was scored
 against is not usable, whatever the numbers say. The result is kept with the
 run and in the history, and `backend/tests/test_model_is_usable.py` checks both
 directions in about 90 seconds, which is short enough to run every time rather
-than only under `--full`.
+than only under `--full`. Both trainers do it: YOLO through ultralytics,
+Faster R-CNN through torchvision, each supplying its own way of loading the
+weights it just wrote.
 
 ## Annotating faster
 
@@ -379,6 +381,22 @@ It also sizes the run to the data. A large model on a small set memorises it
 rather than learning from it, and few images benefit from more passes, so a
 project under 60 annotated images is told to use yolo11n or yolo11s and to
 raise the epochs rather than accept the default.
+
+## Getting things out, and getting rid of them
+
+**A video analysis downloads as CSV.** The page draws the boxes over the clip,
+which answers "did it work". It does not answer "what did it read at 12.4
+seconds", and copying that out of a browser is not a thing anyone should have
+to do. One row per detection, carrying the reading of its frame as well as the
+individual box, so a spreadsheet can be filtered either way. A frame where
+nothing was found still gets a row: the difference between "not looked at" and
+"looked, saw nothing" is worth keeping.
+
+**Generated copies delete in one go.** Filters write a hundred images in
+seconds and removing them was one request per file. The project page offers to
+delete every filtered copy at once, leaving the photographs you annotated
+alone — which is the case that actually comes up, when a preset turns out to
+suit the data badly.
 
 ## Results come back in reading order
 
@@ -641,6 +659,7 @@ python backend/tests/test_video_webcam.py        # one frame at a time, and a vi
 python backend/tests/test_train_augment.py       # what a run does to each image
 python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/test_model_is_usable.py     # trained weights actually detect
+python backend/tests/test_bulk_and_export.py     # bulk delete, and CSV export
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 
