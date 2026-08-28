@@ -8,6 +8,7 @@
       </button>
       <span class="annotate-title">{{ filename }}</span>
       <span class="save-state" :class="saveStateClass">{{ saveStateLabel }}</span>
+      <span v-if="copyNotice" class="copy-notice">{{ copyNotice }}</span>
       <div class="header-actions">
         <button @click="previousImage" :disabled="currentIndex <= 0 || saving" class="btn btn-secondary">
           <Icon name="arrow-left" size="sm" />
@@ -19,6 +20,15 @@
         <button @click="nextImage" :disabled="currentIndex >= totalImages - 1 || saving" class="btn btn-secondary">
           <Icon name="arrow-right" size="sm" />
           <span>Next</span>
+        </button>
+        <button
+          class="btn btn-secondary"
+          :disabled="currentIndex <= 0 || copying"
+          :title="'Copy the boxes from the previous image  (C)'"
+          @click="copyFromPrevious"
+        >
+          <Icon name="copy" size="sm" />
+          <span>{{ copying ? 'Copying...' : 'Copy previous' }}</span>
         </button>
         <button @click="saveAnnotations" class="btn btn-primary" :disabled="saving">
           <Icon name="save" size="sm" />
@@ -256,6 +266,7 @@ onUnmounted(() => {
 
 const loadImage = async () => {
   loading.value = true
+  copyNotice.value = ''
   regions.value = []
   selectedRegionIndex.value = null
   
@@ -553,6 +564,65 @@ const saveThenGo = async (navigate) => {
   navigate()
 }
 
+/**
+ * Bring the previous image's boxes onto this one.
+ *
+ * A camera bolted above a line photographs the same object in nearly the same
+ * place every time, so on those projects almost every box is a small nudge
+ * away from the one before it. Redrawing each from scratch is the bulk of the
+ * work and none of the value.
+ *
+ * The boxes are appended rather than replacing what is already here, and are
+ * left unsaved, so nothing is lost if it turns out to be the wrong image to
+ * copy from: undo is Ctrl+Z away, or move on without saving.
+ */
+const copying = ref(false)
+const copyNotice = ref('')
+
+const copyFromPrevious = async () => {
+  if (currentIndex.value <= 0 || copying.value) return
+  const source = allImages.value[currentIndex.value - 1]
+  if (!source) return
+
+  copying.value = true
+  copyNotice.value = ''
+  try {
+    const result = await projectService.imageData(projectName.value, source.filename)
+    const incoming = result.data?.annotations?.regions || []
+    if (!incoming.length) {
+      copyNotice.value = `"${source.filename}" has no boxes to copy.`
+      return
+    }
+
+    // Sizes differ between images on some projects; a box copied onto a
+    // smaller frame would sit outside it. Scaling by the ratio of the two
+    // keeps it over the same part of the picture.
+    const fromW = result.data?.width || 0
+    const fromH = result.data?.height || 0
+    const toW = imageData.value?.width || 0
+    const toH = imageData.value?.height || 0
+    const scaleX = fromW && toW ? toW / fromW : 1
+    const scaleY = fromH && toH ? toH / fromH : 1
+
+    for (const region of incoming) {
+      regions.value.push({
+        tag: region.tag,
+        x: Math.round(region.x * scaleX),
+        y: Math.round(region.y * scaleY),
+        width: Math.round(region.width * scaleX),
+        height: Math.round(region.height * scaleY),
+      })
+    }
+    dirty.value = true
+    copyNotice.value = `${incoming.length} box(es) copied from ` +
+      `"${source.filename}". Adjust them, then save.`
+  } catch (error) {
+    copyNotice.value = errorMessage(error, 'Could not read the previous image.')
+  } finally {
+    copying.value = false
+  }
+}
+
 // Navigate: fire-and-forget auto-save, navigate immediately
 const previousImage = () => {
   if (currentIndex.value <= 0) return
@@ -625,6 +695,7 @@ const handleKeydown = (e) => {
   }
 
   // Tools
+  if (e.key === 'c' || e.key === 'C') { copyFromPrevious(); return }
   if (e.key === 'd' || e.key === 'D') { activeTool.value = 'draw'; return }
   if (e.key === 'v' || e.key === 'V') { activeTool.value = 'select'; return }
 
@@ -1071,6 +1142,15 @@ kbd {
 </style>
 
 <style scoped>
+.copy-notice {
+  margin-left:0.6rem;
+  padding:0.2rem 0.6rem;
+  border-radius:var(--radius-md);
+  background:var(--accent-soft);
+  color:var(--text-secondary);
+  font-size:0.78rem;
+}
+
 .save-state {
   font-size:0.75rem;
   font-weight:500;

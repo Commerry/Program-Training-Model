@@ -283,6 +283,40 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Annotating faster
+
+**Copy the boxes from the previous image** — the button, or `C`. A camera
+bolted above a line photographs the same object in nearly the same place every
+time, so on those projects almost every box is a small nudge away from the one
+before it; redrawing each from scratch is the bulk of the work and none of the
+value. The boxes are appended rather than replacing what is there, scaled if
+the two images differ in size, and left unsaved, so a wrong copy costs nothing.
+
+**Pre-label with a model from another project.** Auto-labelling used to require
+a completed run in the same project, which is a problem exactly when it would
+help most: a brand-new project has no model, and the reason to pre-label is
+that there is nothing labelled yet. Any model this installation has trained can
+now be chosen. One trained on a similar job usually gets the boxes close enough
+to be worth correcting, and correcting a drawn box is far faster than drawing
+one.
+
+A pass that labels nothing now says why — whether the model found nothing above
+the threshold, or there was nothing to do — rather than reporting a count of
+zero and leaving you to guess.
+
+## The advice before you train
+
+The readiness figure is accompanied by advice that names things rather than
+describing them. "The smallest class has 2 images" leaves someone with nine
+classes no idea what to go and photograph; the project page now says which
+classes are short and by how much, which of them to start with, and what the
+imbalance is between the largest and the smallest.
+
+It also sizes the run to the data. A large model on a small set memorises it
+rather than learning from it, and few images benefit from more passes, so a
+project under 60 annotated images is told to use yolo11n or yolo11s and to
+raise the epochs rather than accept the default.
+
 ## Results come back in reading order
 
 A detector returns boxes in the order it found them, which for most models is

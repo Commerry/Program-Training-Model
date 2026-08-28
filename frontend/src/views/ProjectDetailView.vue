@@ -114,10 +114,9 @@
           <span class="section-tip">ให้โมเดลที่เทรนแล้วตีกรอบให้ก่อน แล้วค่อยแก้</span>
         </h3>
         <p class="augment-desc">
-          Runs this project's best completed model over every image that has no
-          annotations yet and writes its predictions in. Correcting a drawn box
-          is far faster than drawing one, and everything it writes stays fully
-          editable.
+          Runs a trained model over every image that has no annotations yet and
+          writes its predictions in. Correcting a drawn box is far faster than
+          drawing one, and everything it writes stays fully editable.
         </p>
 
         <div class="augment-controls">
@@ -138,6 +137,25 @@
               {{ unannotatedCount }} unannotated image{{ unannotatedCount === 1 ? '' : 's' }}
             </small>
           </div>
+
+          <label class="augment-field">
+            <span>Model</span>
+            <select v-model="autoLabelModel" class="form-input">
+              <option :value="''">This project's best run</option>
+              <optgroup v-if="otherProjectModels.length" label="From another project">
+                <option
+                  v-for="model in otherProjectModels"
+                  :key="model.path"
+                  :value="model.path"
+                >{{ model.project }} / {{ model.label }}</option>
+              </optgroup>
+            </select>
+            <small>
+              A model from a similar job usually gets the boxes close enough to
+              be worth correcting, which is what makes a brand-new project
+              worth pre-labelling at all.
+            </small>
+          </label>
         </div>
 
         <div v-if="autoLabelJob && autoLabelJob.status === 'running'" class="autolabel-progress">
@@ -557,7 +575,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Icon from '@/components/Icon.vue'
 import RoiThumbnail from '@/components/RoiThumbnail.vue'
-import { errorMessage, projectService } from '@/services'
+import { errorMessage, projectService, trainingService } from '@/services'
 import { useProjectStore } from '@/stores/projectStore'
 
 const route = useRoute()
@@ -610,6 +628,21 @@ const rescanning = ref(false)
 const rescanMessage = ref('')
 
 const autoLabelThreshold = ref(0.4)
+// Empty means "this project's own best run"; otherwise the path of a model
+// trained elsewhere. A new project has none of its own, which is exactly when
+// pre-labelling saves the most work.
+const autoLabelModel = ref('')
+const otherProjectModels = ref([])
+
+const loadOtherProjectModels = async () => {
+  try {
+    const models = await trainingService.listTrainedModels()
+    otherProjectModels.value = models.filter(
+      (m) => m.project !== projectName.value && m.checkpoint === 'best')
+  } catch {
+    otherProjectModels.value = []
+  }
+}
 const autoLabelJob = ref(null)
 let autoLabelTimer = null
 
@@ -759,7 +792,9 @@ const startAutoLabel = async () => {
   try {
     const { job } = await projectService.startAutoLabel(projectName.value, {
       score_threshold: autoLabelThreshold.value,
-      only_unannotated: true
+      only_unannotated: true,
+      // Empty means the project's own best run; the server decides then.
+      model_path: autoLabelModel.value || undefined
     })
     autoLabelJob.value = job
     pollAutoLabel()
@@ -778,6 +813,7 @@ const cancelAutoLabel = async () => {
 
 onMounted(async () => {
   await refresh()
+  await loadOtherProjectModels()
   try {
     const { job } = await projectService.autoLabelStatus(projectName.value)
     autoLabelJob.value = job

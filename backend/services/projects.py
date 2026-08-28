@@ -822,23 +822,31 @@ def dataset_summary(name):
     # Per-class support — the weakest class caps model quality (40%).
     MIN_PER_CLASS = 30
     if tags:
-        per_class = [stats['images'] for stats in tags.values()]
+        counts = {tag: stats['images'] for tag, stats in tags.items()}
+        per_class = list(counts.values())
         weakest = min(per_class)
         score += min(weakest / MIN_PER_CLASS, 1.0) * 100 * 0.40
-        if weakest < 10:
+
+        # Named, and sorted by how short they are. "The smallest class has 2
+        # images" leaves someone with nine classes no idea which to go and
+        # photograph; the point of the warning is to say what to do next.
+        short = sorted((c for c in counts.items() if c[1] < MIN_PER_CLASS),
+                       key=lambda item: item[1])
+        if short:
+            listed = ', '.join(f'{tag} ({count})' for tag, count in short[:6])
+            more = f' and {len(short) - 6} more' if len(short) > 6 else ''
             warnings.append(
-                f'The smallest class has only {weakest} images. '
-                f'{MIN_PER_CLASS}+ per class is recommended.'
-            )
-        elif weakest < MIN_PER_CLASS:
-            warnings.append(
-                f'The smallest class has {weakest} images; '
-                f'{MIN_PER_CLASS}+ per class is recommended.'
+                f'{len(short)} class(es) below {MIN_PER_CLASS} images: '
+                f'{listed}{more}.'
             )
         if len(tags) > 1 and max(per_class) > weakest * 10:
+            biggest = max(counts.items(), key=lambda item: item[1])
+            smallest = min(counts.items(), key=lambda item: item[1])
             warnings.append(
-                'Classes are heavily imbalanced (more than 10x between the '
-                'largest and smallest). Consider adding images for rare classes.'
+                f'Classes are heavily imbalanced: "{biggest[0]}" has '
+                f'{biggest[1]} images against {smallest[1]} for '
+                f'"{smallest[0]}". A model trained on this will favour the '
+                'common ones.'
             )
     else:
         warnings.append('No classes defined — draw and tag some boxes first.')
@@ -869,11 +877,29 @@ def dataset_summary(name):
     else:
         recommendations.append('Dataset looks ready for training.')
     if tags:
-        weakest = min(stats['images'] for stats in tags.values())
-        if weakest < MIN_PER_CLASS:
+        counts = {tag: stats['images'] for tag, stats in tags.items()}
+        short = sorted((c for c in counts.items() if c[1] < MIN_PER_CLASS),
+                       key=lambda item: item[1])
+        if short:
+            worst = short[0]
             recommendations.append(
-                f'Add about {MIN_PER_CLASS - weakest} more images for the '
-                'least-represented class.'
+                f'Photograph more examples of "{worst[0]}" first: it has '
+                f'{worst[1]} and wants about {MIN_PER_CLASS - worst[1]} more.'
+            )
+
+        # A small dataset and a large model is the classic way to get a
+        # confident model that has memorised the training set. Say so before
+        # the run rather than after it.
+        if annotated_images < 60:
+            recommendations.append(
+                f'With {annotated_images} annotated images, use a small model '
+                '(yolo11n or yolo11s). A large one will memorise this set '
+                'rather than learn from it.'
+            )
+        if 0 < annotated_images < 200:
+            recommendations.append(
+                'Few images benefit from more passes: 150-300 epochs is a '
+                'better starting point than 100.'
             )
     if annotated_images < 100:
         recommendations.append('For production quality aim for 100+ images per class.')

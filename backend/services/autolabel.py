@@ -68,14 +68,30 @@ def _resolve_model(name, model_path=None):
     than starting from nothing.
     """
     if model_path:
-        return training.resolve_model_path(name, model_path)
+        # Widened from this project to the whole projects tree. A new project
+        # has no model of its own, which is exactly when pre-labelling would
+        # save the most work, and a model trained on a similar job usually
+        # gets most of the boxes close enough to be worth correcting. The
+        # containment and extension checks are the same either way, so nothing
+        # outside the tree becomes reachable.
+        return training.resolve_trained_model(model_path)
 
     candidates = [run for run in training.get_history(name)
                   if run.get('status') == 'completed' and run.get('best_model')]
     if not candidates:
+        available = [m for m in training.list_all_models()
+                     if m['project'] != name and m['checkpoint'] == 'best']
+        if available:
+            suggestion = available[0]
+            raise ProjectError(
+                'This project has no trained model yet. Pick one from another '
+                f'project to pre-label with -- "{suggestion["label"]}" from '
+                f'{suggestion["project"]} is the most recent -- or train this '
+                'project first.'
+            )
         raise ProjectError(
-            'No completed training run for this project yet. Train a model '
-            'first, then use it to pre-label the rest.'
+            'No completed training run anywhere yet. Annotate some images by '
+            'hand, train once, then use that model to pre-label the rest.'
         )
 
     # Best by mAP, falling back to most recent.
@@ -233,9 +249,28 @@ def _run(name, weights, targets, score_threshold, img_size, lock):
 
         projects.rebuild_index(name)
         projects.refresh_stats(name)
+
+        # A run that labels nothing has always looked identical to one that
+        # was never asked to do anything: status completed, no message, and a
+        # count of zero with no hint whether the model found nothing, the
+        # threshold was too high, or the wrong model was chosen.
+        if not targets:
+            message = 'Nothing to do: every image already has annotations.'
+        elif labelled == 0:
+            message = (
+                f'Looked at {len(targets)} image(s) and found nothing above '
+                f'{score_threshold:.2f}. Either the model has not learned '
+                'these objects, or the threshold is too high -- try lowering '
+                'it, or pick a different model.'
+            )
+        else:
+            message = (f'Labelled {labelled} of {len(targets)} image(s) with '
+                       f'{boxes_written} box(es). Check them before training.')
+
         _write_status(name, status='completed', processed=len(targets),
                       labelled=labelled, boxes=boxes_written, skipped=skipped,
-                      errors=errors, completed_at=datetime.now().isoformat())
+                      errors=errors, message=message,
+                      completed_at=datetime.now().isoformat())
     except Exception as exc:  # noqa: BLE001 - reported, not raised
         _write_status(name, status='failed', error=str(exc),
                       completed_at=datetime.now().isoformat())

@@ -55,8 +55,19 @@ check('20 of 30 annotated to start', summary['annotated_images'] == 20, summary[
 
 print('\n== auto-label before any training is refused with a clear reason ==')
 r = c.post('/api/projects/auto/auto-label', json={})
-check('refused, explains why', r.status_code == 400 and 'Train a model' in r.get_json()['message'],
-      r.get_json())
+message = (r.get_json() or {}).get('message', '')
+check('refused', r.status_code == 400, r.status_code)
+# The wording differs depending on whether any other project has a model to
+# borrow, so the check is that it says what to do rather than that it says a
+# particular sentence.
+check('and says what to do about it',
+      'train' in message.lower() and len(message) > 40, message)
+
+print('\n== a model from outside the projects tree is still refused ==')
+r = c.post('/api/projects/auto/auto-label',
+           json={'model_path': str(BACKEND / 'app.py')})
+check('a non-model path is rejected', r.status_code in (400, 403),
+      (r.status_code, (r.get_json() or {}).get('message')))
 
 print('\n== train a small model ==')
 r = c.post('/api/projects/auto/training/start', json={
