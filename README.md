@@ -283,6 +283,35 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Feeding the GPU
+
+Training passed `workers=0`, because ultralytics' dataloader workers used to
+deadlock when the trainer runs as a spawned subprocess on Windows, which is how
+this application launches it. Measured through that exact path with the
+ultralytics in `requirements.txt`, a run at 4 completes normally and produces a
+model indistinguishable from one trained at 0 — so it is now chosen rather than
+pinned, and exposed on the training screen. On a fast card a single process
+decoding JPEGs is the bottleneck and the card idles between batches, which
+looks exactly like a slow GPU and gives no hint of the real cause. If a run
+never reaches epoch 1, set it back to 0; that is the only failure it can cause.
+
+**Caching the decoded images in memory is deliberately not offered.** It looks
+like free speed and it is not. Trained twice on the same images with the same
+seed and epochs, differing only in that setting, both runs reported
+`mAP50 = 0.995`. Asked about ten images from the same generator that neither
+had seen:
+
+```
+cache off  ->  0.29  0.21  0.16  0.21  0.15  0.27  0.19  0.09  0.33  0.20
+cache ram  ->  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01  0.01
+```
+
+The cached run produces a model that predicts nothing while reporting a perfect
+score — the same failure this tool already shipped once, where a run completed,
+reported well, and left weights that detected nothing. It stays off. Passing
+`cache` explicitly still reaches it, for anyone who wants to re-measure on a
+newer ultralytics.
+
 ## Annotating faster
 
 **Copy the boxes from the previous image** — the button, or `C`. A camera

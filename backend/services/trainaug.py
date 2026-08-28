@@ -157,3 +157,71 @@ def sanitise(requested):
         except (TypeError, ValueError):
             continue
     return clean
+
+
+# ── How the images reach the GPU ────────────────────────────────────────────
+
+# Kept low rather than at ultralytics' default of 8. This worker is itself a
+# spawned subprocess, which is the arrangement where the dataloader used to
+# deadlock on Windows. Measured through that exact path -- the application's
+# own subprocess, on Windows, with the ultralytics in requirements.txt -- a run
+# at 4 completes normally and produces a model indistinguishable from one
+# trained at 0. A small number gets most of the benefit with less to go wrong,
+# and 0 remains available if the deadlock ever returns.
+DEFAULT_WORKERS = 4
+
+# Holding the decoded images in memory is NOT offered, and that is a
+# measurement rather than caution.
+#
+# Trained twice on the same 20 images with the same seed and epochs, differing
+# only in this setting, both runs reported mAP50 = 0.995. Asked about ten
+# images from the same generator that neither had seen:
+#
+#     cache off  ->  0.29, 0.21, 0.16, 0.21, 0.15, 0.27, 0.19, 0.09, 0.33, 0.20
+#     cache ram  ->  0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01
+#
+# The cached run produces a model that predicts nothing while reporting a
+# perfect score. That is the exact failure this application already shipped
+# once -- a run that completes, reports well, and yields weights that detect
+# nothing -- so the setting stays off. It remains reachable by passing cache
+# explicitly, for anyone who wants to re-measure it on a newer ultralytics.
+CACHE_IS_SAFE = False
+
+
+def loader_settings(image_count, img_size, workers=None, cache=None):
+    """
+    How many loader processes to use, and whether to hold images in memory.
+
+    Both were previously pinned: workers at 0 and cache off. On a slow card
+    neither matters, because the GPU is what is being waited on. On a fast one
+    a single process decoding JPEGs becomes the bottleneck and the card idles
+    between batches, which looks exactly like a slow GPU and gives no hint of
+    the real cause -- so workers is now chosen rather than pinned.
+
+    `image_count` and `img_size` are accepted for the caching decision and are
+    unused while caching stays off; they are kept so re-enabling it does not
+    mean changing every caller.
+
+    Returns (workers, cache) where cache is 'ram' or False.
+    """
+    try:
+        workers = max(0, min(16, int(workers)))
+    except (TypeError, ValueError):
+        workers = DEFAULT_WORKERS
+
+    if cache is None:
+        cache = 'ram' if CACHE_IS_SAFE else False
+    elif cache in (True, 'ram', 'disk'):
+        cache = 'ram' if cache is True else cache
+    else:
+        cache = False
+
+    return workers, cache
+
+
+def cache_estimate(image_count, img_size):
+    """Bytes an in-memory cache of this set would need, for the UI to show."""
+    try:
+        return int(image_count) * int(img_size) * int(img_size) * 3
+    except (TypeError, ValueError):
+        return 0

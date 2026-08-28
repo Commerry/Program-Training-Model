@@ -339,7 +339,7 @@ def _validate_request(model_type, epochs, batch_size, img_size, learning_rate,
 
 def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
           learning_rate=0.001, export_formats=None, model_name='',
-          augmentation=None, generate_filters=None):
+          augmentation=None, generate_filters=None, workers=None, cache=None):
     """
     Prepare the dataset and launch a training worker in the background.
 
@@ -358,14 +358,15 @@ def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
     try:
         return _start_locked(name, model_type, epochs, batch_size, img_size,
                              learning_rate, export_formats, model_name,
-                             augmentation, generate_filters)
+                             augmentation, generate_filters, workers, cache)
     finally:
         lock.release()
 
 
 def _start_locked(name, model_type, epochs, batch_size, img_size,
                   learning_rate, export_formats, model_name,
-                  augmentation=None, generate_filters=None):
+                  augmentation=None, generate_filters=None,
+                  workers=None, cache=None):
 
     epochs, batch_size, img_size, learning_rate, export_formats = _validate_request(
         model_type, epochs, batch_size, img_size, learning_rate, export_formats
@@ -428,9 +429,15 @@ def _start_locked(name, model_type, epochs, batch_size, img_size,
     settings = dict(advice['settings'])
     settings.update(trainaug.sanitise(augmentation))
 
+    loader_workers, cache_mode = trainaug.loader_settings(
+        report['train_images'] + report['val_images'], img_size,
+        workers=workers, cache=cache)
+
     config = {
         'project_name': name,
         'model_name': model_name,
+        'workers': loader_workers,
+        'cache': cache_mode,
         'augmentation': settings,
         'augmentation_reasons': advice['reasons'],
         'orientation_sensitive': advice['orientation_sensitive'],

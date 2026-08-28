@@ -192,7 +192,17 @@ def main():
             name=model_name,
             exist_ok=True,
             device=device,
-            workers=0,          # dataloader workers deadlock on Windows spawn
+            # How many processes decode and augment images alongside the GPU.
+            # This was pinned to 0 because ultralytics' dataloader workers used
+            # to deadlock when this worker is itself a spawned subprocess on
+            # Windows. Left configurable rather than pinned: on a fast card a
+            # single decoding thread is the bottleneck, and the failure mode if
+            # it returns is visible (a run that never reaches epoch 1) and
+            # recoverable by setting it back to 0.
+            workers=int(config.get('workers', 0) or 0),
+            # Images held in memory across epochs. Worth it when the set fits;
+            # pointless when decoding is not what the run is waiting on.
+            cache=config.get('cache') or False,
             verbose=False,
             plots=True,
             patience=max(20, epochs // 5),

@@ -299,6 +299,22 @@
             </div>
           </div>
 
+          <div v-if="loaderAdvice" class="form-group">
+            <label class="form-label">ความเร็วในการป้อนภาพ</label>
+            <div class="aug-panel">
+              <label class="sample-row">
+                <span>โปรเซสที่เตรียมภาพให้ GPU</span>
+                <input v-model.number="loaderWorkers" type="range" min="0" max="12" step="1" />
+                <strong>{{ loaderWorkers }}</strong>
+              </label>
+
+              <p class="form-hint">
+                ถ้าเทรนแล้ว<strong>ไม่ถึง epoch 1 สักที</strong> ให้ตั้งโปรเซสเป็น 0
+                นั่นคืออาการเดียวที่ค่านี้ทำให้เกิดได้ และแก้ได้ทันที
+              </p>
+            </div>
+          </div>
+
           <p v-if="startError" class="error-message">{{ startError }}</p>
 
           <div v-if="datasetReport" class="dataset-report">
@@ -577,10 +593,18 @@ const mirrorImages = ref(false)
 const generateFilters = ref(false)
 const chosenPresets = ref([])
 
+// How images reach the GPU. Defaults come from the server, which sizes them
+// against this project; both are exposed because the only failure they can
+// cause -- a run that never starts -- is fixed by setting workers to 0.
+const loaderAdvice = ref(null)
+const loaderWorkers = ref(4)
+
 const loadAugmentationAdvice = async () => {
   try {
     const options = await trainingService.options(projectName.value)
     augAdvice.value = options.augmentation || null
+    loaderAdvice.value = options.loader || null
+    if (loaderAdvice.value) loaderWorkers.value = loaderAdvice.value.workers
     if (augAdvice.value) {
       mirrorImages.value = augAdvice.value.settings.fliplr > 0
       chosenPresets.value = [...(augAdvice.value.suggested_presets || [])]
@@ -833,6 +857,7 @@ const startTraining = async () => {
       ...trainingConfig.value,
       augmentation: { fliplr: mirrorImages.value ? 0.5 : 0.0 },
       generate_filters: generateFilters.value ? chosenPresets.value : null,
+      workers: loaderWorkers.value,
     })
     trainingStatus.value = res.config
     datasetReport.value = res.dataset

@@ -21,7 +21,26 @@ def options(project_name):
         'yolo_export_formats': sorted(training.YOLO_EXPORT_FORMATS),
         'frcnn_export_formats': sorted(training.FRCNN_EXPORT_FORMATS),
         'augmentation': trainaug.recommend(project_name),
+        'loader': _loader_advice(project_name),
     })
+
+
+def _loader_advice(project_name):
+    """What the images-to-GPU settings would default to for this project."""
+    summary = training.projects.dataset_summary(project_name)
+    images = summary.get('annotated_images') or 0
+    workers, cache = trainaug.loader_settings(images, 640)
+    return {
+        'workers': workers,
+        'cache': cache,
+        'note': (
+            'Loader processes feed the GPU while it works. This was pinned to 0 '
+            'because the dataloader used to deadlock when the trainer runs as a '
+            'subprocess on Windows; that no longer happens here, and on a fast '
+            'card one decoding process is the bottleneck. If a run never '
+            'reaches epoch 1, set this back to 0.'
+        ),
+    }
 
 
 @training_bp.post('/start')
@@ -38,6 +57,8 @@ def start(project_name):
         model_name=data.get('model_name', ''),
         augmentation=data.get('augmentation'),
         generate_filters=data.get('generate_filters'),
+        workers=data.get('workers'),
+        cache=data.get('cache'),
     ))
 
 

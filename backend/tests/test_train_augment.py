@@ -180,6 +180,49 @@ check('no source image appears on both sides', not (train & val),
       sorted(train & val)[:3])
 c.post('/api/projects/digits/training/stop')
 
+print('\n== how the images reach the GPU ==')
+# Both were fixed: workers at 0 and cache off. On a slow card neither matters
+# because the GPU is what is being waited on; on a fast one a single decoding
+# process becomes the bottleneck and the card idles between batches, which
+# looks exactly like a slow GPU and gives no hint of the real cause.
+workers, cache = trainaug.loader_settings(2232, 640)
+check('loader processes are used', workers > 0, workers)
+
+# Caching the decoded images is deliberately off. Measured twice on the same
+# data with the same seed, both runs reported mAP50 0.995 and the cached one
+# then scored 0.01 on every held-out image while the uncached one scored
+# 0.09-0.33: a model that reports perfectly and detects nothing, which is the
+# exact failure this application already shipped once.
+check('images are not cached in memory by default', cache is False, cache)
+check('not even for a small set',
+      trainaug.loader_settings(15, 640)[1] is False)
+
+check('an explicit choice is honoured',
+      trainaug.loader_settings(100, 640, workers=0, cache=False) == (0, False))
+check('caching remains reachable for anyone re-measuring it',
+      trainaug.loader_settings(100, 640, cache='ram')[1] == 'ram')
+check('nonsense falls back to the defaults',
+      trainaug.loader_settings(100, 640, workers='x', cache='nope')
+      == (trainaug.DEFAULT_WORKERS, False))
+check('workers cannot be set absurdly high',
+      trainaug.loader_settings(100, 640, workers=999)[0] <= 16,
+      trainaug.loader_settings(100, 640, workers=999)[0])
+
+advice = c.get('/api/projects/digits/training/options').get_json()['loader']
+check('the options carry the loader advice', bool(advice), advice)
+check('and say what to do if it deadlocks',
+      'epoch 1' in advice.get('note', ''), advice.get('note', '')[:80])
+
+c.post('/api/projects/digits/training/reset')
+r = c.post('/api/projects/digits/training/start', json={
+    'model_type': 'yolo11n', 'epochs': 1, 'batch_size': 4, 'img_size': 160,
+    'model_name': 'loader_check', 'workers': 2})
+config = (r.get_json() or {}).get('config') or {}
+check('the run records the loader settings it was given',
+      config.get('workers') == 2 and config.get('cache') is False,
+      (config.get('workers'), config.get('cache')))
+c.post('/api/projects/digits/training/stop')
+
 print('\n== presets that only repeat what training already does are not offered ==')
 # Brightness and colour are applied fresh every epoch at no cost in disk or
 # epoch time, so writing them out as files adds nothing.
