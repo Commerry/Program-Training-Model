@@ -155,6 +155,10 @@ def detect_frame():
     return ok({
         'detections': detections,
         'detection_count': len(detections),
+        # Already in reading order, and given as one string because for a
+        # project whose classes are the characters on a display that is the
+        # answer, not a list of boxes.
+        'reading': inference.reading_of(detections),
         'label_names': labels,
         'width': int(frame.shape[1]),
         'height': int(frame.shape[0]),

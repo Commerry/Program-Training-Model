@@ -248,6 +248,7 @@ def _run(job_id):
                     'time_s': round(index / fps, 3),
                     'frame': index,
                     'detections': detections,
+                    'reading': inference.reading_of(detections),
                 })
                 sampled += 1
                 job['frames_done'] = sampled

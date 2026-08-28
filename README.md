@@ -283,6 +283,28 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Results come back in reading order
+
+A detector returns boxes in the order it found them, which for most models is
+by confidence. That is the wrong order for anything being read rather than
+counted: a display showing **250** comes back as 0, 2, 5 or 5, 0, 2 depending
+on which digit the model happened to be surest about, and the number is gone.
+
+Every path that returns detections -- still images, video frames, the camera --
+now sorts them the way a person reads. Boxes are grouped into lines first, by
+whether they overlap vertically, then read left to right within each line;
+sorting purely by x would be right for one line and wrong the moment there are
+two, putting a digit low on the left before one high on the right.
+
+Each detection carries its `line` and `position`, and each result carries a
+`reading`: the labels as one string, with lines separated by a newline. For a
+project whose classes are the characters on a display, that string is the
+answer, and the list of boxes is the working.
+
+The tolerance for "same line" is half the shorter box's height, which is
+forgiving enough for digits that sit slightly high or low and strict enough to
+keep two rows apart.
+
 ## Augmentation: what happens automatically, and what you ask for
 
 Two different things go by that name here, and keeping them apart decides what
@@ -520,6 +542,7 @@ python backend/tests/test_augment.py             # the colour filters, and the b
 python backend/tests/test_train_end_to_end.py    # a real run, then detection with it
 python backend/tests/test_video_webcam.py        # one frame at a time, and a video
 python backend/tests/test_train_augment.py       # what a run does to each image
+python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 

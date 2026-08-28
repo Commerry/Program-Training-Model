@@ -284,10 +284,12 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size):
 
         encoded = _encode(annotated)
         if encoded:
+            ordered = sort_reading_order(detections)
             results.append({
                 'filename': filename,
-                'detection_count': len(detections),
-                'detections': detections,
+                'detection_count': len(ordered),
+                'detections': ordered,
+                'reading': reading_of(ordered),
                 'annotated_image': encoded,
             })
 
@@ -362,10 +364,12 @@ def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
 
         encoded = _encode(annotated)
         if encoded:
+            ordered = sort_reading_order(detections)
             results.append({
                 'filename': filename,
-                'detection_count': len(detections),
-                'detections': detections,
+                'detection_count': len(ordered),
+                'detections': ordered,
+                'reading': reading_of(ordered),
                 'annotated_image': encoded,
             })
 
@@ -449,7 +453,7 @@ def _detect_ultralytics(entry, bgr, threshold, label_names, img_size):
                 'score': round(float(score), 4),
                 'box': [x1, y1, x2, y2],
             })
-    return detections, active
+    return sort_reading_order(detections), active
 
 
 def _detect_frcnn(entry, bgr, threshold, label_names):
@@ -485,7 +489,7 @@ def _detect_frcnn(entry, bgr, threshold, label_names):
             'score': round(float(score), 4),
             'box': [x1, y1, x2, y2],
         })
-    return detections, active
+    return sort_reading_order(detections), active
 
 
 def decode_frame(file_storage):
@@ -496,3 +500,70 @@ def decode_frame(file_storage):
     if data.size == 0:
         return None
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+# ── Reading order ───────────────────────────────────────────────────────────
+#
+# A detector returns boxes in whatever order it found them, which for most
+# models is by confidence. That is the wrong order for anything being read
+# rather than counted: a gauge showing 250 comes back as 0, 2, 5 or 5, 0, 2
+# depending on which digit the model was surest about, and the number is lost.
+#
+# Sorting purely by x is right for a single line and wrong the moment there are
+# two, because a digit low on the left would come before one high on the right.
+# So boxes are grouped into lines first, by whether they overlap vertically,
+# and only then read left to right within each line.
+
+def _vertical_overlap(a, b):
+    """How much of the shorter box's height the two share, 0 to 1."""
+    top, bottom = max(a[1], b[1]), min(a[3], b[3])
+    shared = max(0, bottom - top)
+    shortest = min(a[3] - a[1], b[3] - b[1])
+    return shared / shortest if shortest > 0 else 0.0
+
+
+def sort_reading_order(detections, line_overlap=0.5):
+    """
+    Detections in the order a person would read them.
+
+    Returns a new list; each entry gains `line` (0-based, top to bottom) and
+    `position` (0-based within its line) so the caller can group them without
+    repeating this work.
+
+    `line_overlap` is how much of their height two boxes must share to count as
+    being on the same line. Half is forgiving enough for digits that sit
+    slightly high or low, and strict enough to separate two rows.
+    """
+    remaining = sorted(detections or [], key=lambda d: d['box'][1])
+    lines = []
+    for detection in remaining:
+        for line in lines:
+            # Compared against the line's first box rather than its last, so a
+            # line cannot drift downwards across a long row.
+            if _vertical_overlap(detection['box'], line[0]['box']) >= line_overlap:
+                line.append(detection)
+                break
+        else:
+            lines.append([detection])
+
+    ordered = []
+    for line_index, line in enumerate(lines):
+        line.sort(key=lambda d: d['box'][0])
+        for position, detection in enumerate(line):
+            ordered.append({**detection, 'line': line_index, 'position': position})
+    return ordered
+
+
+def reading_of(detections):
+    """
+    The labels of these detections as one string, in reading order.
+
+    For a project whose classes are the characters being read this is the
+    answer the user actually wanted: '250', not a list of three boxes. Lines
+    are separated by a newline so a two-row display stays two rows.
+    """
+    ordered = sort_reading_order(detections)
+    lines = {}
+    for detection in ordered:
+        lines.setdefault(detection['line'], []).append(str(detection['label_name']))
+    return '\n'.join(''.join(lines[index]) for index in sorted(lines))

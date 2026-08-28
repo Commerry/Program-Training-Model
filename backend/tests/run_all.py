@@ -42,6 +42,8 @@ SUITES = [
      'one frame at a time for a webcam, and a whole video'),
     ('train augment', TESTS / 'test_train_augment.py', False,
      'what training does to each image, and what it writes first'),
+    ('reading order', TESTS / 'test_reading_order.py', False,
+     'detections come back in the order a person reads them'),
 ]
 
 

@@ -319,6 +319,7 @@
             </div>
           </div>
           <div v-if="cameraOn" class="live-bar">
+            <span v-if="liveReading" class="reading-chip">{{ liveReading }}</span>
             <span>พบ <strong>{{ liveDetections.length }}</strong> วัตถุ</span>
             <span v-for="(count, label) in liveTally" :key="label" class="chip chip-purple">
               {{ label }} × {{ count }}
@@ -353,6 +354,7 @@
               <span>{{ videoJob.frames_total }} เฟรม</span>
               <span>พบรวม <strong>{{ videoJob.detection_count }}</strong> วัตถุ</span>
               <span>ใช้เวลา {{ videoJob.elapsed_s }}s</span>
+              <span v-if="playbackReading" class="reading-chip">{{ playbackReading }}</span>
               <span v-if="playbackDetections.length" class="chip chip-green">
                 ตอนนี้ {{ playbackDetections.length }} วัตถุ
               </span>
@@ -411,11 +413,17 @@
                 <img :src="item.annotated_image" :alt="item.filename" class="rc-img" />
               </div>
 
+              <div v-if="item.reading" class="rc-reading">
+                <span class="rc-reading-label">อ่านได้</span>
+                <span class="rc-reading-value">{{ item.reading }}</span>
+              </div>
+
               <div v-if="item.detections.length" class="rc-table">
                 <div class="rct-head">
-                  <span>Label</span><span>Score</span><span>Bounding Box</span>
+                  <span>#</span><span>Label</span><span>Score</span><span>Bounding Box</span>
                 </div>
                 <div v-for="(d, idx) in item.detections" :key="idx" class="rct-row">
+                  <span class="rct-order">{{ idx + 1 }}</span>
                   <span class="rct-label">{{ d.label_name }}</span>
                   <span class="rct-score">{{ d.score }}</span>
                   <span class="rct-box">{{ d.box.join(', ') }}</span>
@@ -533,6 +541,21 @@ const canTest       = computed(() => {
   }
   return imageFiles.value.length > 0
 })
+
+// The classes in reading order, as one string. For a project whose classes
+// are the characters on a display this is the answer; a list of boxes is not.
+const readingOf = (detections) => {
+  const lines = {}
+  for (const d of detections || []) {
+    const line = d.line ?? 0
+    ;(lines[line] ||= []).push(d.label_name)
+  }
+  return Object.keys(lines).sort((a, b) => a - b)
+    .map((k) => lines[k].join('')).join('\n')
+}
+
+const liveReading = computed(() => readingOf(liveDetections.value))
+const playbackReading = computed(() => readingOf(playbackDetections.value))
 
 const liveTally = computed(() => {
   const counts = {}
@@ -1491,9 +1514,58 @@ const runTest = async () => {
 .rc-img { width:100%; display:block; aspect-ratio:4/3; object-fit:contain; background:var(--bg); }
 
 .rc-table { padding:0.55rem 0.7rem; }
+.rc-reading {
+  display:flex;
+  align-items:baseline;
+  gap:0.6rem;
+  margin:0.6rem 0 0.2rem;
+  padding:0.5rem 0.75rem;
+  border:1px solid var(--accent);
+  border-radius:var(--radius-md);
+  background:var(--accent-soft);
+}
+
+.rc-reading-label {
+  color:var(--text-secondary);
+  font-size:0.76rem;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+}
+
+.rc-reading-value {
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:1.35rem;
+  font-weight:700;
+  letter-spacing:0.08em;
+  white-space:pre-line;
+  user-select:text;
+  cursor:text;
+}
+
+.reading-chip {
+  padding:0.2rem 0.6rem;
+  border:1px solid var(--accent);
+  border-radius:var(--radius-md);
+  background:var(--accent-soft);
+  color:var(--text-primary);
+  font-family:var(--font-mono);
+  font-size:1rem;
+  font-weight:700;
+  letter-spacing:0.06em;
+  white-space:pre-line;
+  user-select:text;
+  cursor:text;
+}
+
+.rct-order {
+  color:var(--text-tertiary);
+  font-family:var(--font-mono);
+}
+
 .rct-head {
   display:grid;
-  grid-template-columns:1fr auto auto;
+  grid-template-columns:1.4rem 1fr auto auto;
   gap:0.3rem;
   font-size:0.72rem;
   font-weight:700;
@@ -1506,7 +1578,7 @@ const runTest = async () => {
 }
 .rct-row {
   display:grid;
-  grid-template-columns:1fr auto auto;
+  grid-template-columns:1.4rem 1fr auto auto;
   gap:0.3rem;
   font-size:0.78rem;
   padding:0.22rem 0;
