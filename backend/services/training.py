@@ -553,9 +553,19 @@ def list_models(name):
                 if not path.is_file():
                     continue
                 stat = path.stat()
+                run = path.relative_to(runs_dir).parts[0]
+                # Ultralytics names every run's output best.pt / last.pt, so a
+                # list showing file names alone reads as the same model over
+                # and over. The run is what tells them apart, and whether a
+                # file is the best epoch or the final one is the other half of
+                # the answer.
+                which = 'best' if path.stem == 'best' else (
+                    'last epoch' if path.stem == 'last' else path.stem)
                 models.append({
                     'name': path.name,
-                    'run': path.relative_to(runs_dir).parts[0],
+                    'label': f'{run} ({which}, {path.suffix.lstrip(".")})',
+                    'run': run,
+                    'checkpoint': which,
                     'path': str(path),
                     'format': path.suffix.lstrip('.'),
                     'size_mb': round(stat.st_size / 1024 / 1024, 2),

@@ -14,7 +14,7 @@
       </div>
       <div v-if="inferenceSummary" class="summary-chips">
         <span class="chip chip-purple">
-          <Icon name="box" size="sm" /> {{ inferenceSummary.model_name }}
+          <Icon name="box" size="sm" /> {{ pickedModel ? pickedModel.run : inferenceSummary.model_name }}
         </span>
         <span class="chip chip-blue">
           <Icon name="server" size="sm" /> {{ inferenceSummary.device }}
@@ -97,10 +97,14 @@
                   :class="{ 'trained-item--on': pickedModel?.path === model.path }"
                   @click="pickTrained(model)"
                 >
-                  <span class="trained-name">{{ model.name }}</span>
+                  <!--
+                    The run, not the file name: every run writes best.pt and
+                    last.pt, so a list of file names is the same word repeated.
+                  -->
+                  <span class="trained-name">{{ model.label }}</span>
                   <span class="trained-meta">
-                    {{ model.project }} / {{ model.run }} &bull;
-                    {{ model.format }} &bull; {{ model.size_mb }} MB
+                    {{ model.project }} &bull; {{ model.size_mb }} MB &bull;
+                    {{ formatDateTime(model.modified) }}
                   </span>
                 </button>
               </li>
@@ -434,6 +438,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import DetectionOverlay from '@/components/DetectionOverlay.vue'
+import { formatDateTime } from '@/utils/format'
 import { errorMessage, trainingService } from '@/services'
 
 // ── Constants ───────────────────────────────────────────────────────
