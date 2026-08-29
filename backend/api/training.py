@@ -59,6 +59,7 @@ def start(project_name):
         generate_filters=data.get('generate_filters'),
         workers=data.get('workers'),
         cache=data.get('cache'),
+        base_model=data.get('base_model'),
     ))
 
 

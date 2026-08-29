@@ -67,6 +67,95 @@ def _project_lock(name):
         return _project_locks[name]
 
 
+# Formats a run can be continued from. An ONNX export is a compiled graph with
+# no optimiser state and no trainable head; it runs and cannot be trained. This
+# matters in practice: someone who kept only the .onnx from a site has no way
+# back to fine-tuning, and the .pt is the file worth archiving.
+FINE_TUNE_SUFFIXES = {'.pt', '.pth'}
+
+
+def describe_base_model(path):
+    """
+    What a model can tell us about itself before it is trained further.
+
+    The class list is the part that matters. Fine-tuning onto a different set
+    of classes still works -- the backbone carries over, which is most of the
+    value -- but the detection head is rebuilt, so anything the old model knew
+    about a class that is not in the new list is discarded. Better to say that
+    before the run than to leave someone wondering why an hour of training
+    forgot half of what it started with.
+    """
+    path = Path(path)
+    info = {'path': str(path), 'name': path.name, 'classes': [], 'img_size': None}
+    try:
+        from ultralytics import YOLO
+        model = YOLO(str(path))
+        names = getattr(model, 'names', None)
+        if isinstance(names, dict) and names:
+            info['classes'] = [str(names[k]) for k in sorted(names)]
+        elif isinstance(names, (list, tuple)):
+            info['classes'] = [str(n) for n in names]
+        args = getattr(getattr(model, 'model', None), 'args', None) or {}
+        size = args.get('imgsz')
+        if isinstance(size, (list, tuple)) and size:
+            size = size[0]
+        if isinstance(size, (int, float)) and size > 0:
+            info['img_size'] = int(size)
+    except Exception:  # noqa: BLE001 - a model we cannot introspect is still usable
+        pass
+    return info
+
+
+def compare_classes(base_classes, project_classes):
+    """
+    How a starting model's classes line up with the project about to train.
+
+    Returned rather than enforced: continuing a glove model onto a site that
+    also labels a new defect type is a reasonable thing to do, and so is
+    dropping a class. What is not reasonable is finding out afterwards.
+    """
+    base = [str(c) for c in (base_classes or [])]
+    project = [str(c) for c in (project_classes or [])]
+    kept = [c for c in project if c in base]
+    added = [c for c in project if c not in base]
+    dropped = [c for c in base if c not in project]
+
+    if base and not project:
+        note = 'This project has no classes yet.'
+    elif not base:
+        note = ('The starting model does not report its classes, so how much '
+                'carries over cannot be checked here.')
+    elif not added and not dropped:
+        note = (f'Same {len(kept)} class(es) as the starting model. Everything '
+                'it learned carries over; this is the case fine-tuning is best at.')
+    else:
+        parts = []
+        if kept:
+            parts.append(f'{len(kept)} class(es) in common')
+        if added:
+            parts.append(f'new: {", ".join(added[:5])}')
+        if dropped:
+            parts.append(f'not in this project: {", ".join(dropped[:5])}')
+        note = ('; '.join(parts) + '. The backbone carries over either way, but '
+                'the detection head is rebuilt, so what the old model knew '
+                'about the classes it no longer sees is discarded.')
+
+    return {'base': base, 'project': project, 'kept': kept,
+            'added': added, 'dropped': dropped, 'note': note}
+
+
+def resolve_base_model(raw_path):
+    """A model this server trained, in a format that can be trained further."""
+    candidate = resolve_trained_model(raw_path)
+    if candidate.suffix.lower() not in FINE_TUNE_SUFFIXES:
+        raise ProjectError(
+            f'{candidate.name} cannot be trained further. An ONNX or '
+            'TorchScript export is a compiled graph with no trainable head -- '
+            'continue from the .pt the run also produced.'
+        )
+    return candidate
+
+
 def _weights_path(model_type):
     """
     Absolute path for a pretrained checkpoint.
@@ -339,7 +428,8 @@ def _validate_request(model_type, epochs, batch_size, img_size, learning_rate,
 
 def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
           learning_rate=0.001, export_formats=None, model_name='',
-          augmentation=None, generate_filters=None, workers=None, cache=None):
+          augmentation=None, generate_filters=None, workers=None, cache=None,
+          base_model=None):
     """
     Prepare the dataset and launch a training worker in the background.
 
@@ -348,6 +438,12 @@ def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
     project's own class names. `generate_filters` asks for filtered copies of
     the annotated images to be written first, and is a list of preset names or
     True for the default set.
+
+    `base_model` continues from a model this server already trained instead of
+    starting again from the stock checkpoint. That is the difference between
+    teaching a model what a glove is and teaching one that already knows what
+    the gloves at this site look like: the second needs a fraction of the
+    images and a fraction of the time.
     """
     projects.get_project(name)
     lock = _project_lock(name)
@@ -358,7 +454,8 @@ def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
     try:
         return _start_locked(name, model_type, epochs, batch_size, img_size,
                              learning_rate, export_formats, model_name,
-                             augmentation, generate_filters, workers, cache)
+                             augmentation, generate_filters, workers, cache,
+                             base_model)
     finally:
         lock.release()
 
@@ -366,7 +463,7 @@ def start(name, model_type='yolo11s', epochs=100, batch_size=16, img_size=640,
 def _start_locked(name, model_type, epochs, batch_size, img_size,
                   learning_rate, export_formats, model_name,
                   augmentation=None, generate_filters=None,
-                  workers=None, cache=None):
+                  workers=None, cache=None, base_model=None):
 
     epochs, batch_size, img_size, learning_rate, export_formats = _validate_request(
         model_type, epochs, batch_size, img_size, learning_rate, export_formats
@@ -429,6 +526,16 @@ def _start_locked(name, model_type, epochs, batch_size, img_size,
     settings = dict(advice['settings'])
     settings.update(trainaug.sanitise(augmentation))
 
+    # Where the weights start from. The stock checkpoint unless told otherwise.
+    base_info = None
+    class_comparison = None
+    starting_weights = _weights_path(model_type)
+    if base_model:
+        base_path = resolve_base_model(base_model)
+        starting_weights = str(base_path)
+        base_info = describe_base_model(base_path)
+        class_comparison = compare_classes(base_info['classes'], report['classes'])
+
     loader_workers, cache_mode = trainaug.loader_settings(
         report['train_images'] + report['val_images'], img_size,
         workers=workers, cache=cache)
@@ -444,7 +551,9 @@ def _start_locked(name, model_type, epochs, batch_size, img_size,
         'generated_filters': (filter_report or {}).get('created_count', 0),
         'generated_filter_presets': (filter_report or {}).get('tones', []),
         'model_type': model_type,
-        'weights': _weights_path(model_type),
+        'weights': starting_weights,
+        'base_model': base_info,
+        'base_classes': class_comparison,
         'epochs': epochs,
         'batch_size': batch_size,
         'img_size': img_size,

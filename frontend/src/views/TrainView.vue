@@ -241,6 +241,33 @@
             </p>
           </div>
 
+          <div v-if="continuableModels.length" class="form-group">
+            <label class="form-label">เริ่มจากโมเดลที่มีอยู่</label>
+            <select v-model="baseModel" class="form-input">
+              <option :value="''">เริ่มใหม่จากศูนย์ (COCO)</option>
+              <option
+                v-for="model in continuableModels"
+                :key="model.path"
+                :value="model.path"
+              >{{ model.project }} / {{ model.label }}</option>
+            </select>
+            <p class="form-hint">
+              <template v-if="baseModel">
+                โมเดลนี้รู้จักวัตถุอยู่แล้ว เหลือแค่เรียนว่าที่นี่หน้าตาเป็นยังไง
+                — ใช้ภาพน้อยกว่ามากและเร็วกว่า เหมาะกับการขยายไปโรงงานใหม่
+              </template>
+              <template v-else>
+                เริ่มจากศูนย์ต้องใช้ภาพหลักพันและเวลานาน
+                ถ้าเคยเทรนงานเดียวกันไว้แล้วให้เลือกโมเดลนั้นแทน
+                จะใช้ภาพหลักสิบก็พอ
+              </template>
+            </p>
+            <p class="form-hint">
+              เลือกได้เฉพาะ <code>.pt</code> — ไฟล์ ONNX เป็นกราฟที่คอมไพล์แล้ว
+              เทรนต่อไม่ได้ เก็บ <code>.pt</code> ของทุกโรงงานไว้เสมอ
+            </p>
+          </div>
+
           <div class="form-group">
             <label class="form-label">Augmentation</label>
 
@@ -397,6 +424,14 @@
           images. A run can report a perfect mAP and detect nothing: mAP
           measures ranking, not whether the confidences are usable.
         -->
+        <div v-if="baseInfo" class="self-check">
+          <Icon name="box" size="sm" />
+          <span>
+            ต่อยอดจาก <strong>{{ baseInfo.name }}</strong>
+            <template v-if="baseClasses"> — {{ baseClasses.note }}</template>
+          </span>
+        </div>
+
         <div v-if="selfCheck" class="self-check" :class="{ 'self-check--bad': !selfCheck.usable }">
           <Icon :name="selfCheck.usable ? 'check-circle' : 'alert-triangle'" size="sm" />
           <span v-if="selfCheck.usable">
@@ -617,6 +652,23 @@ const chosenPresets = ref([])
 // How images reach the GPU. Defaults come from the server, which sizes them
 // against this project; both are exposed because the only failure they can
 // cause -- a run that never starts -- is fixed by setting workers to 0.
+// Continuing from a model this server trained, rather than from the stock
+// checkpoint. This is what makes a new site a short job instead of a long one:
+// the model already knows the object, and only its appearance has changed.
+const baseModel = ref('')
+const continuableModels = ref([])
+
+const loadContinuableModels = async () => {
+  try {
+    const models = await trainingService.listTrainedModels()
+    // Only .pt can be trained further; an ONNX export has no trainable head.
+    continuableModels.value = models.filter(
+      (m) => m.format === 'pt' && m.checkpoint === 'best')
+  } catch {
+    continuableModels.value = []
+  }
+}
+
 const loaderAdvice = ref(null)
 const loaderWorkers = ref(4)
 
@@ -709,6 +761,8 @@ const METRIC_LABELS = [
 ]
 
 const selfCheck = computed(() => trainingStatus.value?.self_check || null)
+const baseInfo = computed(() => trainingStatus.value?.base_model || null)
+const baseClasses = computed(() => trainingStatus.value?.base_classes || null)
 
 const displayMetrics = computed(() => {
   const metrics = trainingStatus.value?.metrics || {}
@@ -763,6 +817,7 @@ onMounted(async () => {
   await loadProjectInfo()
   await loadDatasetSummary()
   await loadAugmentationAdvice()
+  await loadContinuableModels()
   await loadTrainingStatus()
   await loadModels()
 })
@@ -881,6 +936,7 @@ const startTraining = async () => {
       augmentation: { fliplr: mirrorImages.value ? 0.5 : 0.0 },
       generate_filters: generateFilters.value ? chosenPresets.value : null,
       workers: loaderWorkers.value,
+      base_model: baseModel.value || undefined,
     })
     trainingStatus.value = res.config
     datasetReport.value = res.dataset

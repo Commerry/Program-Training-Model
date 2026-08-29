@@ -116,7 +116,14 @@ def main():
 
         device, device_label = describe_device()
         log(f'Device: {device_label}')
-        log(f'Loading pretrained weights: {weights}')
+        base = config.get('base_model')
+        if base:
+            log(f'Continuing from a model this server trained: {base.get("name")}')
+            comparison = config.get('base_classes') or {}
+            if comparison.get('note'):
+                log(f'  classes: {comparison["note"]}')
+        else:
+            log(f'Loading pretrained weights: {weights}')
 
         from ultralytics import YOLO, RTDETR
         loader = RTDETR if model_type.startswith('rtdetr') else YOLO
@@ -298,6 +305,7 @@ def main():
             'batch_size': batch_size,
             'img_size': img_size,
             'classes': config.get('classes', []),
+            'base_model': config.get('base_model'),
             'train_images': config.get('train_images'),
             'val_images': config.get('val_images'),
             'metrics': final_metrics,

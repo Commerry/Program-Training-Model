@@ -283,6 +283,39 @@ that had produced it. It now lists what this installation has trained and runs
 the chosen one directly; the path is resolved against the projects tree first,
 so it cannot be pointed at anything else on the filesystem.
 
+## Taking a model to a new site
+
+A model trained at one factory does not work at the next. The lighting is
+different, the camera is different, the background is different — the object
+has not changed but everything around it has. Retraining from the stock
+checkpoint every time is thousands of images and hours per site, and it throws
+away everything the previous model learned about the object itself.
+
+A run can now continue from a model this installation already trained. Pick it
+on the training screen; the rest is unchanged. What the numbers looked like on
+a deliberately shifted "site B" — same twelve images, same epochs, one starting
+from stock and one continuing:
+
+```
+from stock  ->  mAP50 0.995,  detects on 0/2 validation images,  best 0.00
+continued   ->  mAP50 0.995,  detects on 2/2 validation images,  best 0.98
+```
+
+Both report a perfect mAP. Only one is usable, and the self-check is what says
+which — the same reason it exists.
+
+Two things worth knowing:
+
+- **Keep the `.pt`.** An ONNX or TorchScript export is a compiled graph with no
+  trainable head: it runs and cannot be continued. Someone who archives only
+  the `.onnx` from a site has no way back to fine-tuning. The `.pt` is the file
+  worth keeping.
+- **The class lists are compared before the run**, and what it says is recorded
+  with it. Continuing onto a different set of classes works — the backbone
+  carries over, which is most of the value — but the detection head is rebuilt,
+  so what the old model knew about a class the new project does not have is
+  discarded.
+
 ## Feeding the GPU
 
 Training passed `workers=0`, because ultralytics' dataloader workers used to
@@ -660,6 +693,7 @@ python backend/tests/test_train_augment.py       # what a run does to each image
 python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/test_model_is_usable.py     # trained weights actually detect
 python backend/tests/test_bulk_and_export.py     # bulk delete, and CSV export
+python backend/tests/test_fine_tune.py           # continuing from a trained model
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 

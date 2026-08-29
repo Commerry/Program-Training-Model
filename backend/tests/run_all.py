@@ -48,6 +48,8 @@ SUITES = [
      'a finished run produces weights that actually detect'),
     ('bulk and export', TESTS / 'test_bulk_and_export.py', False,
      'deleting many images at once, and a video analysis as CSV'),
+    ('fine tune', TESTS / 'test_fine_tune.py', True,
+     'continuing from a trained model instead of starting over'),
 ]
 
 
