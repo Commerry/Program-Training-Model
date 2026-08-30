@@ -381,6 +381,55 @@ than only under `--full`. Both trainers do it: YOLO through ultralytics,
 Faster R-CNN through torchvision, each supplying its own way of loading the
 weights it just wrote.
 
+## Trying a model on one image
+
+The annotate screen has a **Detect** button (or `F`) beside a model chooser. It
+runs the chosen model over the image on screen and drops what it found in as
+ordinary editable boxes. Nothing is saved.
+
+This is deliberately not auto-labelling. That is a bulk background pass over
+everything unannotated, and turning a model loose on a thousand pictures is a
+poor way to find out whether it is worth trusting. One image, on demand, while
+somebody is looking at it, answers that question in a few seconds — and the
+same button is the fastest way to label an image once the answer is yes.
+
+## How well each class is doing
+
+The project page listed how many boxes each class had, which says how much work
+went in and nothing about whether any of it worked. Each class now also carries
+the figure from the newest finished run:
+
+```
+block: 347  92%      circle: 128  71%      8: 96  34%
+```
+
+A single overall mAP does not help here. On a ten-class detector, "0.72" and
+"everything is fine except 8" call for completely different next actions, and
+only the second says what to go and photograph.
+
+A class the validation split never contained shows no figure at all rather than
+0%. Not measured is not the same as scored zero, and showing zero would send
+someone to fix a model that was never tested on it.
+
+### best.pt is not always the best weights
+
+ultralytics picks `best.pt` by fitness, which is mostly mAP50-95 — a ranking
+measure. An epoch whose precision has collapsed to 0.008 can still rank well
+and win. Seen on an ordinary 24-image run:
+
+```
+Epoch 21:  precision 1.000   recall 0.948   mAP50 0.995
+Epoch 23:  precision 0.008   recall 1.000   mAP50 0.995   <- chosen as "best"
+
+best.pt  ->  detects on 0/5 validation images
+last.pt  ->  detects on 2/5, best score 0.40
+```
+
+`best.pt` is not silently redefined — quietly handing back different weights
+than the ones named is its own kind of dishonesty — but when it fails the
+self-check the last-epoch weights are checked too, and if those work the run
+says so and names them.
+
 ## Annotating faster
 
 **Copy the boxes from the previous image** — the button, or `C`. A camera
@@ -694,6 +743,7 @@ python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/test_model_is_usable.py     # trained weights actually detect
 python backend/tests/test_bulk_and_export.py     # bulk delete, and CSV export
 python backend/tests/test_fine_tune.py           # continuing from a trained model
+python backend/tests/test_detect_and_accuracy.py # detect on one image, class accuracy
 python backend/tests/bench_scale.py              # timings against a 2232-image project
 ```
 

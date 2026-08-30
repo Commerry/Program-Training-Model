@@ -263,6 +263,27 @@ def main():
         # see worker_common.self_check for the run where that happened.
         check = self_check(best_pt, config.get('dataset_path'), img_size, log)
 
+        # ultralytics picks best.pt by fitness, which is mostly mAP50-95 --
+        # a ranking measure. An epoch whose precision has collapsed to 0.008
+        # can still rank well and win, and then best.pt detects nothing while
+        # the final epoch's weights work fine. Seen on an ordinary 24-image
+        # run: best 0/5 at any usable threshold, last 2/5 at 0.40.
+        #
+        # best.pt is not silently redefined -- quietly handing back different
+        # weights than the ones named is its own kind of dishonesty -- but the
+        # alternative is checked and reported, because a run that produced a
+        # working model and hands over a broken one is worth a sentence.
+        if check and not check.get('usable') and last_pt.exists() and last_pt != best_pt:
+            other = self_check(last_pt, config.get('dataset_path'), img_size, log)
+            if other and other.get('usable'):
+                check['alternative'] = {'path': str(last_pt), 'name': last_pt.name,
+                                        **other}
+                log(f'But {last_pt.name} from the same run does detect '
+                    f'({other["images_with_detections"]}/'
+                    f'{other["images_checked"]} images, best '
+                    f'{other["best_score"]:.2f}). ultralytics chose best.pt by '
+                    'a ranking score; use the last-epoch weights instead.')
+
         # ── Exports ──────────────────────────────────────────────────────
         exported = {'pt': str(best_pt)}
         if export_formats:

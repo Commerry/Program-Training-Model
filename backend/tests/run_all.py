@@ -50,6 +50,8 @@ SUITES = [
      'deleting many images at once, and a video analysis as CSV'),
     ('fine tune', TESTS / 'test_fine_tune.py', True,
      'continuing from a trained model instead of starting over'),
+    ('detect and accuracy', TESTS / 'test_detect_and_accuracy.py', True,
+     'detecting on one image, and accuracy per class'),
 ]
 
 

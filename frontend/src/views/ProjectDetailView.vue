@@ -296,6 +296,31 @@
           >
             <Icon name="tag" size="xs" />
             {{ tag }}: <strong>{{ stats.boxes }}</strong>
+            <!--
+              How many boxes were drawn says how much work went in; it says
+              nothing about whether any of it worked. The figure from the last
+              run is what tells someone which class to go and photograph more
+              of.
+            -->
+            <span
+              v-if="accuracyFor(tag) !== null"
+              class="tag-accuracy"
+              :class="accuracyClass(accuracyFor(tag))"
+            >{{ Math.round(accuracyFor(tag) * 100) }}%</span>
+          </span>
+        </div>
+
+        <div v-if="accuracy && accuracy.run" class="accuracy-note">
+          <Icon name="chart-bar" size="sm" />
+          <span>
+            ความแม่นยำจากรอบ <strong>{{ accuracy.run }}</strong>
+            <template v-if="accuracy.overall">
+              (รวม {{ Math.round(accuracy.overall * 100) }}%)
+            </template>
+            <template v-if="accuracy.measured_at">
+              เมื่อ {{ formatDateTime(accuracy.measured_at) }}
+            </template>
+            <template v-if="accuracy.note"> — {{ accuracy.note }}</template>
           </span>
         </div>
       </div>
@@ -591,6 +616,7 @@ import Icon from '@/components/Icon.vue'
 import RoiThumbnail from '@/components/RoiThumbnail.vue'
 import { errorMessage, projectService, trainingService } from '@/services'
 import { useProjectStore } from '@/stores/projectStore'
+import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -645,6 +671,32 @@ const autoLabelThreshold = ref(0.4)
 // Empty means "this project's own best run"; otherwise the path of a model
 // trained elsewhere. A new project has none of its own, which is exactly when
 // pre-labelling saves the most work.
+// Per-class accuracy from the newest completed run. Kept separate from the
+// tag counts because they answer different questions: one is how much was
+// drawn, the other is whether it worked.
+const accuracy = ref(null)
+
+const loadAccuracy = async () => {
+  try {
+    accuracy.value = await projectService.classAccuracy(projectName.value)
+  } catch {
+    accuracy.value = null
+  }
+}
+
+const accuracyFor = (tag) => {
+  const entry = (accuracy.value?.classes || []).find((c) => c.name === tag)
+  // null rather than 0 for a class the validation split never contained: not
+  // measured is not the same as scored zero, and showing 0% would send someone
+  // to fix a model that was never tested on it.
+  return entry && entry.measured ? entry.ap50 : null
+}
+
+const accuracyClass = (value) =>
+  value >= 0.7 ? 'tag-accuracy--good'
+    : value >= 0.4 ? 'tag-accuracy--fair'
+      : 'tag-accuracy--poor'
+
 const deletingImages = ref(false)
 const generatedCount = computed(
   () => store.images.filter((image) => image.augmented).length)
@@ -853,6 +905,7 @@ const cancelAutoLabel = async () => {
 onMounted(async () => {
   await refresh()
   await loadOtherProjectModels()
+  await loadAccuracy()
   try {
     const { job } = await projectService.autoLabelStatus(projectName.value)
     autoLabelJob.value = job
@@ -1315,6 +1368,29 @@ const truncateFilename = (filename, maxLength = 20) => {
   display:flex;
   align-items:center;
   gap:0.5rem;
+}
+
+.tag-accuracy {
+  margin-left:0.35rem;
+  padding:0.05rem 0.35rem;
+  border-radius:999px;
+  font-size:0.74rem;
+  font-weight:700;
+  font-family:var(--font-mono);
+}
+
+.tag-accuracy--good { background:var(--success-100); color:var(--success-700); }
+.tag-accuracy--fair { background:var(--warning-100); color:var(--warning-700); }
+.tag-accuracy--poor { background:var(--danger-100);  color:var(--danger-700); }
+
+.accuracy-note {
+  display:flex;
+  align-items:flex-start;
+  gap:0.5rem;
+  margin-top:0.6rem;
+  color:var(--text-secondary);
+  font-size:0.82rem;
+  line-height:1.6;
 }
 
 .tags-list {

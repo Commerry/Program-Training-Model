@@ -94,6 +94,70 @@ def get_image_data(project_name, filename):
     return ok({'data': projects.get_image_data(project_name, filename)})
 
 
+@projects_bp.post('/<project_name>/images/<filename>/detect')
+def detect_on_image(project_name, filename):
+    """
+    Run a model over one image already in the project, and hand back regions.
+
+    Deliberately separate from both auto-labelling and from saving. Auto-label
+    is a bulk background pass over everything unannotated; this is one image,
+    on demand, while somebody is looking at it -- so it can be tried on a
+    single picture to see whether a model is worth trusting before it is turned
+    loose on a thousand.
+
+    Nothing is written. The boxes come back in the same shape the annotation
+    editor uses, and it is the person looking at them who decides.
+    """
+    from services import inference, training
+    from services.imaging import imread
+
+    data = request.get_json(silent=True) or {}
+    model_path = training.resolve_trained_model(data.get('model_path'))
+
+    path = projects.images_dir(project_name) / projects.safe_filename(filename)
+    if not path.is_file():
+        raise ProjectError('No such image in this project', status=404)
+    image = imread(path)
+    if image is None:
+        raise ProjectError('That image could not be read')
+
+    detections, labels = inference.detect_frame(
+        model_path, image,
+        score_threshold=data.get('score_threshold', 0.4),
+        label_names=data.get('label_names'),
+        img_size=data.get('img_size'))
+
+    # The editor works in x/y/width/height with a tag; the detector answers in
+    # corners with a class name. Converting here keeps that difference out of
+    # the page.
+    regions = []
+    for detection in detections:
+        x1, y1, x2, y2 = detection['box']
+        regions.append({
+            'tag': detection['label_name'],
+            'x': int(x1), 'y': int(y1),
+            'width': int(x2 - x1), 'height': int(y2 - y1),
+            'score': detection['score'],
+        })
+
+    return ok({
+        'regions': regions,
+        'count': len(regions),
+        'reading': inference.reading_of(detections),
+        'label_names': labels,
+        'model': Path(model_path).name,
+        'width': int(image.shape[1]),
+        'height': int(image.shape[0]),
+    })
+
+
+@projects_bp.get('/<project_name>/class-accuracy')
+def class_accuracy(project_name):
+    """How well the newest finished run did on each class."""
+    from services import training
+    return ok(training.class_accuracy(project_name))
+
+
 @projects_bp.post('/<project_name>/images/delete')
 def delete_images(project_name):
     """

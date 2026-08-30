@@ -690,6 +690,75 @@ def list_models(name):
     return sorted(models, key=lambda m: m['modified'], reverse=True)
 
 
+def class_accuracy(name):
+    """
+    How well the newest finished run did on each class of this project.
+
+    The project page already lists the classes with how many boxes each has,
+    which says how much was drawn and nothing about whether any of it worked.
+    A single overall mAP does not help either: on a detector with ten classes,
+    "0.72" and "everything is fine except 8" call for completely different
+    next actions, and only the second tells anyone what to go and photograph.
+
+    Classes with no figure are reported too, with `measured` false. A class the
+    validation split never contained is not a class that scored zero, and
+    showing 0% for it would send someone to fix a model that was never tested
+    on it.
+    """
+    runs = [r for r in get_history(name)
+            if r.get('status') == 'completed' and (r.get('per_class') or r.get('metrics'))]
+    if not runs:
+        return {'measured_at': None, 'run': None, 'classes': [], 'overall': None,
+                'note': 'No completed training run yet, so nothing has been measured.'}
+
+    runs.sort(key=lambda r: r.get('completed_at') or '', reverse=True)
+    latest = runs[0]
+    per_class = latest.get('per_class') or {}
+
+    summary = projects.dataset_summary(name)
+    tags = summary.get('tags') or {}
+
+    classes = []
+    for tag in sorted(tags):
+        stats = per_class.get(tag) or {}
+        ap50 = stats.get('ap50')
+        classes.append({
+            'name': tag,
+            'boxes': (tags[tag] or {}).get('boxes', 0),
+            'images': (tags[tag] or {}).get('images', 0),
+            'ap50': ap50,
+            'precision': stats.get('precision'),
+            'recall': stats.get('recall'),
+            'measured': ap50 is not None,
+        })
+
+    note = ''
+    if not per_class:
+        note = ('The run recorded no per-class figures. That happens when the '
+                'validation split was too small for them to mean anything.')
+    else:
+        weak = [c for c in classes if c['measured'] and c['ap50'] < 0.5]
+        unmeasured = [c for c in classes if not c['measured']]
+        parts = []
+        if weak:
+            parts.append('weakest: ' + ', '.join(
+                f'{c["name"]} ({c["ap50"] * 100:.0f}%)'
+                for c in sorted(weak, key=lambda c: c['ap50'])[:4]))
+        if unmeasured:
+            parts.append(f'{len(unmeasured)} class(es) never appeared in the '
+                         'validation split, so they were not measured')
+        note = '; '.join(parts)
+
+    return {
+        'measured_at': latest.get('completed_at'),
+        'run': latest.get('model_name'),
+        'model_type': latest.get('model_type'),
+        'overall': (latest.get('metrics') or {}).get('mAP50'),
+        'classes': classes,
+        'note': note,
+    }
+
+
 def list_all_models():
     """
     Every weight file this installation has produced, across every project.

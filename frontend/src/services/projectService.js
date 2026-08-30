@@ -58,6 +58,21 @@ export const projectService = {
   imageUrl: (name, filename) =>
     `/api${base(name)}/images/${encodeURIComponent(filename)}/raw`,
 
+  /**
+   * Run a model over one image and get regions back, without saving anything.
+   *
+   * Separate from auto-labelling on purpose: that is a bulk background pass,
+   * this is one image on demand, so a model can be tried on a single picture
+   * before it is turned loose on a thousand.
+   */
+  detectOnImage: (name, filename, options) =>
+    http
+      .post(`${base(name)}/images/${encodeURIComponent(filename)}/detect`, options)
+      .then((r) => r.data),
+
+  classAccuracy: (name) =>
+    http.get(`${base(name)}/class-accuracy`).then((r) => r.data),
+
   saveAnnotations: (name, filename, regions) =>
     http
       .post(`${base(name)}/images/${encodeURIComponent(filename)}/annotations`, { regions })

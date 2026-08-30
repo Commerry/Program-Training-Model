@@ -21,6 +21,32 @@
           <Icon name="arrow-right" size="sm" />
           <span>Next</span>
         </button>
+        <!--
+          Detecting is kept beside the manual tools rather than folded into
+          them: it suggests boxes, it does not save any, and whether to keep
+          what it suggests is the annotator's call every time.
+        -->
+        <select
+          v-if="detectModels.length"
+          v-model="detectModel"
+          class="toolbar-select"
+          title="Model to detect with"
+        >
+          <option :value="''">เลือกโมเดล…</option>
+          <option v-for="model in detectModels" :key="model.path" :value="model.path">
+            {{ model.project }} / {{ model.label }}
+          </option>
+        </select>
+        <button
+          v-if="detectModels.length"
+          class="btn btn-secondary"
+          :disabled="!detectModel || detecting"
+          :title="'Detect labels on this image with the chosen model  (F)'"
+          @click="detectLabels"
+        >
+          <Icon name="zap" size="sm" />
+          <span>{{ detecting ? 'Detecting...' : 'Detect' }}</span>
+        </button>
         <button
           class="btn btn-secondary"
           :disabled="currentIndex <= 0 || copying"
@@ -168,7 +194,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { errorMessage, projectService } from '@/services'
+import { errorMessage, projectService, trainingService } from '@/services'
 import { fabric } from 'fabric'
 import Icon from '@/components/Icon.vue'
 
@@ -244,6 +270,9 @@ onMounted(async () => {
       projectService.tags(projectName.value),
       projectService.images(projectName.value)
     ])
+    // Not awaited with the rest: the page is usable without it, and a server
+    // with no trained models should not delay opening an image.
+    loadDetectModels()
     existingTags.value = tagsResult.tags || []
     allImages.value = imagesResult.images || []
     totalImages.value = allImages.value.length
@@ -579,6 +608,63 @@ const saveThenGo = async (navigate) => {
 const copying = ref(false)
 const copyNotice = ref('')
 
+// Detecting with a trained model, one image at a time. Nothing is written:
+// the boxes arrive as ordinary unsaved regions, so a model can be tried on a
+// single picture and the result thrown away by moving on.
+const detectModels = ref([])
+const detectModel = ref('')
+const detecting = ref(false)
+
+const loadDetectModels = async () => {
+  try {
+    const models = await trainingService.listTrainedModels()
+    detectModels.value = models.filter((m) => m.checkpoint === 'best')
+    // Remembered across images so the choice is made once per session.
+    const remembered = window.sessionStorage?.getItem('annotate.detectModel')
+    if (remembered && detectModels.value.some((m) => m.path === remembered)) {
+      detectModel.value = remembered
+    }
+  } catch {
+    detectModels.value = []
+  }
+}
+
+watch(detectModel, (value) => {
+  try { window.sessionStorage?.setItem('annotate.detectModel', value || '') } catch { /* private mode */ }
+})
+
+const detectLabels = async () => {
+  if (!detectModel.value || detecting.value) return
+  detecting.value = true
+  copyNotice.value = ''
+  try {
+    const result = await projectService.detectOnImage(
+      projectName.value, filename.value,
+      { model_path: detectModel.value, score_threshold: 0.4 })
+
+    if (!result.count) {
+      copyNotice.value = `${result.model} found nothing here above 0.40.`
+      return
+    }
+    for (const region of result.regions) {
+      regions.value.push({
+        tag: region.tag,
+        x: region.x, y: region.y,
+        width: region.width, height: region.height,
+      })
+      if (!existingTags.value.includes(region.tag)) existingTags.value.push(region.tag)
+    }
+    dirty.value = true
+    copyNotice.value = `${result.count} box(es) from ${result.model}` +
+      (result.reading ? ` — reads "${result.reading}"` : '') +
+      '. Check them, then save.'
+  } catch (error) {
+    copyNotice.value = errorMessage(error, 'Detection failed.')
+  } finally {
+    detecting.value = false
+  }
+}
+
 const copyFromPrevious = async () => {
   if (currentIndex.value <= 0 || copying.value) return
   const source = allImages.value[currentIndex.value - 1]
@@ -696,6 +782,7 @@ const handleKeydown = (e) => {
 
   // Tools
   if (e.key === 'c' || e.key === 'C') { copyFromPrevious(); return }
+  if (e.key === 'f' || e.key === 'F') { detectLabels(); return }
   if (e.key === 'd' || e.key === 'D') { activeTool.value = 'draw'; return }
   if (e.key === 'v' || e.key === 'V') { activeTool.value = 'select'; return }
 
@@ -1142,6 +1229,17 @@ kbd {
 </style>
 
 <style scoped>
+.toolbar-select {
+  max-width:14rem;
+  padding:0.4rem 0.6rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+  color:var(--text-primary);
+  font:inherit;
+  font-size:0.84rem;
+}
+
 .copy-notice {
   margin-left:0.6rem;
   padding:0.2rem 0.6rem;

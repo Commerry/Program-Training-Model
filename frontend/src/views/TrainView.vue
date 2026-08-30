@@ -448,6 +448,17 @@
           </span>
         </div>
 
+        <div v-if="selfCheck && selfCheck.alternative" class="self-check">
+          <Icon name="check-circle" size="sm" />
+          <span>
+            แต่ <strong>{{ selfCheck.alternative.name }}</strong> จากรอบเดียวกันใช้ได้ —
+            เจอบน {{ selfCheck.alternative.images_with_detections }}/{{
+              selfCheck.alternative.images_checked }} ภาพ
+            (สูงสุด {{ selfCheck.alternative.best_score }})
+            ให้เลือกไฟล์นี้แทน <code>best.pt</code> ตอนทดสอบหรือ fine-tune
+          </span>
+        </div>
+
         <!-- Completed: show exported formats only -->
         <div v-if="trainingStatus.status === 'completed'" class="complete-banner">
           <Icon name="check-circle" size="sm" />
