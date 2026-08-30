@@ -503,6 +503,11 @@ def augment_color_images(name, source_filenames=None, tones=None,
                     'annotated': bool(ann.get('annotated')),
                     'width': ann.get('width'),
                     'height': ann.get('height'),
+                    # A copy belongs to whichever upload its source came from,
+                    # so filtering the gallery by batch shows a photograph
+                    # together with everything made from it.
+                    'batch': ann.get('batch'),
+                    'imported_at': ann.get('imported_at'),
                     'augmented': True,
                     'augmentation': {
                         'type': 'color_tone',

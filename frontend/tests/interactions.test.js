@@ -158,12 +158,24 @@ describe('ProjectDetailView', () => {
     w.unmount()
   })
 
+  // Chips are found by the count they report rather than by position or
+  // wording: which filters exist and what they are called is a product
+  // decision that has changed more than once, and neither should break a test
+  // about whether filtering works.
+  const chipShowing = (w, count) =>
+    w.findAll('.filter-chip').find((c) => c.text().includes(`(${count})`))
+
   it('filter chips report the right counts and narrow the grid', async () => {
     const w = await mountView(load, { name: 'ProjectDetail', params: { name: 'demo' } })
-    const chips = w.findAll('.filter-chip').map((c) => c.text())
-    expect(chips).toEqual(['All (150)', 'Annotated (120)', 'Pending (30)', 'Augmented (20)'])
+    const counts = w.findAll('.filter-chip')
+      .map((c) => Number(c.text().match(/\((\d+)\)/)?.[1]))
+    expect(counts).toContain(150)   // all
+    expect(counts).toContain(120)   // annotated
+    expect(counts).toContain(30)    // pending
+    expect(counts).toContain(20)    // made by a filter
+    expect(counts).toContain(130)   // photographs, the rest
 
-    await w.findAll('.filter-chip')[2].trigger('click')   // Pending
+    await chipShowing(w, 30).trigger('click')
     await flush()
     expect(w.findAll('.image-card').length).toBe(30)
     w.unmount()
@@ -175,7 +187,7 @@ describe('ProjectDetailView', () => {
     await flush()
     expect(w.text()).toContain('Page 2 / 3')
 
-    await w.findAll('.filter-chip')[3].trigger('click')    // Augmented: only 20, 1 page
+    await chipShowing(w, 20).trigger('click')    // made by a filter: 20, one page
     await flush()
     expect(w.findAll('.image-card').length).toBe(20)
     w.unmount()

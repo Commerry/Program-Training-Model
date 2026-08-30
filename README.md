@@ -381,6 +381,34 @@ than only under `--full`. Both trainers do it: YOLO through ultralytics,
 Faster R-CNN through torchvision, each supplying its own way of loading the
 weights it just wrote.
 
+## Adding images to a project that already has some
+
+While a project is being built, "everything unlabelled" and "the images I just
+added" are the same set. The moment it is being extended — a second site, a new
+shift, a run of parts the model got wrong — they stop being: a handful of
+pictures skipped months ago are still unlabelled, and running a model over
+those alongside today's import mixes two decisions into one review.
+
+**Every upload is numbered.** The gallery separates them, each tile says which
+one it came from, and a copy made by a filter belongs to the batch its source
+came from — so filtering by batch shows a photograph together with everything
+made from it.
+
+**Photographs and generated copies filter separately.** The chips are
+`ทั้งหมด / รูปถ่ายจริง / จากฟิลเตอร์ / ตีกรอบแล้ว / ยังไม่ตีกรอบ`, and a tile
+made by a filter is marked as one. Copies are worth training on and are never
+worth re-drawing, so telling them apart at a glance matters.
+
+**Auto-labelling can be pointed at one upload.** With more than one batch
+present it defaults to the newest, which after adding images is almost always
+what was meant. Everything unlabelled is still available as a choice.
+
+While building this, saving a box turned out to erase the batch number the
+upload had written, because the save rewrote the annotation from scratch. The
+fields that describe where an image came from — its batch, when it arrived,
+its original filename, whether a model drew it — now survive a save. Only the
+boxes and the dimensions are the save's to own.
+
 ## Trying a model on one image
 
 The annotate screen has a **Detect** button (or `F`) beside a model chooser. It
@@ -742,6 +770,7 @@ python backend/tests/test_train_augment.py       # what a run does to each image
 python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/test_model_is_usable.py     # trained weights actually detect
 python backend/tests/test_bulk_and_export.py     # bulk delete, and CSV export
+python backend/tests/test_import_batches.py      # one upload from another
 python backend/tests/test_fine_tune.py           # continuing from a trained model
 python backend/tests/test_detect_and_accuracy.py # detect on one image, class accuracy
 python backend/tests/bench_scale.py              # timings against a 2232-image project

@@ -243,6 +243,7 @@ def start_auto_label(project_name):
     return ok({'job': autolabel.start(
         project_name,
         model_path=data.get('model_path'),
+        batch=data.get('batch'),
         score_threshold=data.get('score_threshold', 0.4),
         only_unannotated=bool(data.get('only_unannotated', True)),
         overwrite=bool(data.get('overwrite', False)),

@@ -131,10 +131,25 @@
             </small>
           </label>
 
+          <label v-if="batches.length > 1" class="augment-field">
+            <span>เฉพาะชุดที่นำเข้า</span>
+            <select v-model="autoLabelBatch" class="form-input">
+              <option :value="''">ทุกภาพที่ยังไม่ตีกรอบ</option>
+              <option v-for="entry in batches" :key="entry.batch" :value="entry.batch">
+                {{ entry.batch === 0 ? 'ชุดแรก' : `ชุดที่ ${entry.batch}` }}
+                — {{ entry.pending }} ภาพยังไม่ตีกรอบ
+              </option>
+            </select>
+            <small>
+              ภาพเก่าที่เคยข้ามไว้ก็ยังนับว่ายังไม่ตีกรอบ
+              เลือกชุดล่าสุดถ้าต้องการทำเฉพาะภาพที่เพิ่งเพิ่ม
+            </small>
+          </label>
+
           <div class="augment-field">
             <span>Will process</span>
             <small class="autolabel-count">
-              {{ unannotatedCount }} unannotated image{{ unannotatedCount === 1 ? '' : 's' }}
+              {{ autoLabelTargetCount }} unannotated image{{ autoLabelTargetCount === 1 ? '' : 's' }}
             </small>
           </div>
 
@@ -349,6 +364,16 @@
               {{ option.label }} ({{ option.count }})
             </button>
           </div>
+          <label v-if="batches.length > 1" class="roi-toggle" title="Which upload">
+            <span>ชุดที่นำเข้า</span>
+            <select v-model="batchFilter" class="batch-select">
+              <option value="">ทุกชุด</option>
+              <option v-for="entry in batches" :key="entry.batch" :value="entry.batch">
+                {{ entry.batch === 0 ? 'ชุดแรก' : `ชุดที่ ${entry.batch}` }}
+                — {{ entry.photos }} รูปถ่าย{{ entry.pending ? `, ${entry.pending} ยังไม่ตีกรอบ` : '' }}
+              </option>
+            </select>
+          </label>
           <label class="roi-toggle" title="Draw annotation boxes on each thumbnail">
             <input v-model="showRoi" type="checkbox" />
             <span>Show ROI</span>
@@ -476,6 +501,19 @@
                 <span v-else class="badge badge-warning">
                   <Icon name="clock" size="xs" />
                   Pending
+                </span>
+                <!--
+                  Which upload it came in, and whether a filter made it. Both
+                  are invisible in a filename, and both change what someone
+                  should do with the tile: a copy is not worth re-drawing, and
+                  an image from the newest upload is the one still to review.
+                -->
+                <span v-if="image.augmented" class="badge badge-filter">
+                  <Icon name="zap" size="xs" />
+                  ฟิลเตอร์
+                </span>
+                <span v-if="batches.length > 1" class="badge badge-batch">
+                  {{ (image.batch ?? 0) === 0 ? 'ชุดแรก' : `ชุดที่ ${image.batch}` }}
                 </span>
               </div>
               
@@ -723,6 +761,17 @@ const deleteGenerated = async () => {
 }
 
 const autoLabelModel = ref('')
+// Defaults to the newest upload once there is more than one: after adding
+// images to an existing project, "the ones I just added" is almost always what
+// is meant, and a few pictures skipped months ago are still unlabelled.
+const autoLabelBatch = ref('')
+
+const autoLabelTargetCount = computed(() => {
+  const pending = store.images.filter((i) => !i.annotated && !i.augmented)
+  if (autoLabelBatch.value === '') return pending.length
+  const wanted = Number(autoLabelBatch.value)
+  return pending.filter((i) => (i.batch ?? 0) === wanted).length
+})
 const otherProjectModels = ref([])
 
 const loadOtherProjectModels = async () => {
@@ -770,19 +819,53 @@ watch(showRoi, (value) => {
 const imageFilters = computed(() => {
   const images = store.images
   return [
-    { value: 'all', label: 'All', count: images.length },
-    { value: 'annotated', label: 'Annotated', count: images.filter((i) => i.annotated).length },
-    { value: 'pending', label: 'Pending', count: images.filter((i) => !i.annotated).length },
-    { value: 'augmented', label: 'Augmented', count: images.filter((i) => i.augmented).length }
+    { value: 'all', label: 'ทั้งหมด', count: images.length },
+    { value: 'photos', label: 'รูปถ่ายจริง', count: images.filter((i) => !i.augmented).length },
+    { value: 'augmented', label: 'จากฟิลเตอร์', count: images.filter((i) => i.augmented).length },
+    { value: 'annotated', label: 'ตีกรอบแล้ว', count: images.filter((i) => i.annotated).length },
+    { value: 'pending', label: 'ยังไม่ตีกรอบ', count: images.filter((i) => !i.annotated).length }
   ]
 })
 
+/**
+ * The uploads this project has had, newest first.
+ *
+ * Once a project is being extended rather than built, "which images are the
+ * new ones" stops being obvious from a list of timestamps. Images from before
+ * uploads were numbered have no batch, which reads as the original set and is
+ * what they are.
+ */
+const batches = computed(() => {
+  const seen = new Map()
+  for (const image of store.images) {
+    const key = image.batch ?? 0
+    const entry = seen.get(key) || { batch: key, count: 0, photos: 0, pending: 0, at: image.imported_at }
+    entry.count += 1
+    if (!image.augmented) entry.photos += 1
+    if (!image.annotated) entry.pending += 1
+    if (image.imported_at && (!entry.at || image.imported_at < entry.at)) entry.at = image.imported_at
+    seen.set(key, entry)
+  }
+  return [...seen.values()].sort((a, b) => b.batch - a.batch)
+})
+
+const latestBatch = computed(() =>
+  batches.value.length ? batches.value[0].batch : null)
+
+const batchFilter = ref('')
+
 const filteredImages = computed(() => {
+  let images = store.images
+  if (batchFilter.value !== '') {
+    const wanted = Number(batchFilter.value)
+    images = images.filter((i) => (i.batch ?? 0) === wanted)
+  }
   switch (imageFilter.value) {
-    case 'annotated': return store.images.filter((i) => i.annotated)
-    case 'pending': return store.images.filter((i) => !i.annotated)
-    case 'augmented': return store.images.filter((i) => i.augmented)
-    default: return store.images
+    case 'annotated': return images.filter((i) => i.annotated)
+    case 'pending': return images.filter((i) => !i.annotated)
+    case 'augmented': return images.filter((i) => i.augmented)
+    case 'photos': return images.filter((i) => !i.augmented)
+    default: return images
   }
 })
 
@@ -884,6 +967,7 @@ const startAutoLabel = async () => {
     const { job } = await projectService.startAutoLabel(projectName.value, {
       score_threshold: autoLabelThreshold.value,
       only_unannotated: true,
+      batch: autoLabelBatch.value === '' ? undefined : Number(autoLabelBatch.value),
       // Empty means the project's own best run; the server decides then.
       model_path: autoLabelModel.value || undefined
     })
@@ -906,6 +990,9 @@ onMounted(async () => {
   await refresh()
   await loadOtherProjectModels()
   await loadAccuracy()
+  // Pre-selecting the newest upload is the common case for a project being
+  // extended; a project with one upload keeps the simpler "everything" default.
+  if (batches.value.length > 1) autoLabelBatch.value = latestBatch.value
   try {
     const { job } = await projectService.autoLabelStatus(projectName.value)
     autoLabelJob.value = job
@@ -1822,6 +1909,28 @@ const truncateFilename = (filename, maxLength = 20) => {
   display:flex;
   flex-wrap:wrap;
   gap:0.375rem;
+}
+
+.batch-select {
+  margin-left:0.4rem;
+  padding:0.25rem 0.5rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+  color:var(--text-primary);
+  font:inherit;
+  font-size:0.8rem;
+}
+
+.badge-filter {
+  background:var(--purple-50);
+  color:var(--purple-600);
+}
+
+.badge-batch {
+  background:var(--surface-3);
+  color:var(--text-secondary);
+  font-family:var(--font-mono);
 }
 
 .filter-chip {

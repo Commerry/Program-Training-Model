@@ -110,8 +110,16 @@ def _resolve_model(name, model_path=None):
 
 
 def start(name, model_path=None, score_threshold=0.4, overwrite=False,
-          only_unannotated=True, img_size=None, limit=None):
-    """Kick off a background labelling pass. Returns the initial status."""
+          only_unannotated=True, img_size=None, limit=None, batch=None):
+    """
+    Kick off a background labelling pass. Returns the initial status.
+
+    `batch` narrows the pass to one upload. Once a project is being extended
+    rather than built, "everything unlabelled" and "the images I just added"
+    stop being the same set: a few pictures skipped months ago are still
+    unlabelled, and running a model over them alongside today's import mixes
+    two decisions into one review.
+    """
     projects.get_project(name)
 
     try:
@@ -134,8 +142,18 @@ def start(name, model_path=None, score_threshold=0.4, overwrite=False,
     if current and current.get('status') == 'running':
         raise ProjectError('Auto-labelling is already running for this project')
 
+    if batch is not None:
+        try:
+            batch = int(batch)
+        except (TypeError, ValueError):
+            batch = None
+
+    entries = projects.list_images(name)
+    if batch is not None:
+        entries = [e for e in entries if e.get('batch') == batch]
+
     targets = [
-        entry['filename'] for entry in projects.list_images(name)
+        entry['filename'] for entry in entries
         if (not entry['annotated'] or (overwrite and not only_unannotated))
         and not entry['augmented']
     ]

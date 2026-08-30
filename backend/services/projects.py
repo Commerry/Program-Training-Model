@@ -266,7 +266,7 @@ def delete_project(name):
 # outside the app without changing those counts are picked up by
 # rebuild_index(), which the training and dataset paths always call.
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 
 # A thumbnail a few hundred pixels wide cannot usefully show more outlines than
 # this, and an image with hundreds of boxes would otherwise dominate the index.
@@ -362,6 +362,11 @@ def _entry_from_annotation(filename, ann, size_kb=None):
         'width': ann.get('width'),
         'height': ann.get('height'),
         'augmented': bool(ann.get('augmented')),
+        # Which upload this image arrived in. Images from before batches were
+        # recorded have none, which reads as "the original set" and is exactly
+        # what they are.
+        'batch': ann.get('batch'),
+        'imported_at': ann.get('imported_at'),
         'size_kb': size_kb,
     }
 
@@ -551,8 +556,17 @@ def save_annotations(name, filename, regions):
         'height': img_h,
         'updated_at': datetime.now().isoformat(),
     }
-    # Preserve augmentation provenance so augmented images are not re-augmented.
-    for key in ('augmented', 'augmentation'):
+    # Everything about the image that saving boxes has no business changing.
+    #
+    # This is a whitelist rather than a merge because the fields above are
+    # authoritative -- regions, annotated and the dimensions are exactly what
+    # this call is for -- while the rest describe where the image came from and
+    # must survive. Drawing a box used to erase the batch number an upload had
+    # written, so the next upload saw no batches at all and started again at 1.
+    for key in ('augmented', 'augmentation',   # a copy is not re-augmented
+                'batch', 'imported_at',        # which upload it arrived in
+                'original_name',               # what the file was called
+                'auto_labelled', 'auto_label'):  # drawn by a model, for review
         if key in existing:
             data[key] = existing[key]
 
@@ -605,6 +619,11 @@ def list_images(name):
             'width': entry.get('width'),
             'height': entry.get('height'),
             'augmented': bool(entry.get('augmented')),
+            # Which upload this arrived in, so the gallery can separate them
+            # and auto-labelling can be pointed at one. None for images from
+            # before uploads were numbered, which reads as the original set.
+            'batch': entry.get('batch'),
+            'imported_at': entry.get('imported_at'),
             'size_kb': entry.get('size_kb'),
         })
     return result
@@ -640,11 +659,33 @@ def get_image_data(name, filename):
     }
 
 
+def next_batch_number(name):
+    """
+    The number the next upload will be recorded under.
+
+    Once a project is being extended rather than built -- a second site, a new
+    shift, a run of parts that the model got wrong -- "which images are the new
+    ones" stops being obvious from the file list. Each upload is stamped with a
+    number so the gallery can separate them and auto-labelling can be pointed
+    at the newest set rather than at everything unlabelled.
+    """
+    highest = 0
+    for entry in load_index(name).get('entries', {}).values():
+        try:
+            highest = max(highest, int(entry.get('batch') or 0))
+        except (TypeError, ValueError):
+            continue
+    return highest + 1
+
+
 def import_images(name, file_objects):
     """Store uploaded files under images/ with collision-free names."""
     _require(name)
     target_dir = images_dir(name)
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    batch = next_batch_number(name)
+    imported_at = datetime.now().isoformat()
 
     imported, rejected = [], []
     for index, file in enumerate(file_objects):
@@ -675,13 +716,18 @@ def import_images(name, file_objects):
             'width': size[0],
             'height': size[1],
             'original_name': original,
+            'batch': batch,
+            'imported_at': imported_at,
         })
-        imported.append({'filename': new_name, 'original_name': original})
+        imported.append({'filename': new_name, 'original_name': original,
+                         'batch': batch})
 
     # One rebuild after a bulk import beats patching the index per file.
     rebuild_index(name)
     refresh_stats(name)
-    return {'imported': imported, 'rejected': rejected, 'imported_count': len(imported)}
+    return {'imported': imported, 'rejected': rejected,
+            'imported_count': len(imported), 'batch': batch,
+            'imported_at': imported_at}
 
 
 def delete_image(name, filename):
