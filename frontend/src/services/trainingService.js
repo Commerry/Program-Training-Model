@@ -83,6 +83,17 @@ export const trainingService = {
   /** URL for downloading a finished analysis as CSV. Followed by the browser. */
   videoCsvUrl: (jobId) => `/api/models/video/${encodeURIComponent(jobId)}/csv`,
 
+  /**
+   * The last test as a spreadsheet, with the annotated images in it.
+   *
+   * Posted rather than requested because testing images is stateless: there
+   * is no run on the server to refer back to, so the results travel up with
+   * the request.
+   */
+  exportTestResults: (payload) =>
+    http.post('/models/test/export', payload, { responseType: 'blob' })
+      .then((r) => r.data),
+
   videoStatus: (jobId) =>
     http.get(`/models/video/${encodeURIComponent(jobId)}`).then((r) => r.data.job),
 

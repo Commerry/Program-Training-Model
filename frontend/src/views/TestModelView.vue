@@ -405,9 +405,22 @@
               <strong>{{ totalDetections }}</strong> object(s) found
               (threshold ≥ {{ scoreThreshold.toFixed(2) }})
             </span>
+            <span v-if="uncertainCount" class="rs-uncertain">
+              <Icon name="alert-triangle" size="sm" />
+              {{ uncertainCount }} below {{ UNCERTAIN_BELOW }} — check by eye
+            </span>
+            <button class="link-btn" :disabled="exporting" @click="exportResults">
+              <Icon name="download" size="sm" />
+              {{ exporting ? 'Preparing...' : 'Export to Excel' }}
+            </button>
           </div>
           <div class="results-grid">
-            <article v-for="item in results" :key="item.filename" class="result-card">
+            <article
+              v-for="item in results"
+              :key="item.filename"
+              class="result-card result-card--clickable"
+              @click="openDetail(item)"
+            >
 
               <div class="rc-header">
                 <div class="rc-filename" :title="item.filename">
@@ -450,6 +463,62 @@
       </main>
     </div>
   </div>
+
+    <!--
+      One result, large. The grid answers "how did it do overall"; this answers
+      "what exactly did it say about this picture", which is the question asked
+      of anything that looks wrong.
+    -->
+    <div v-if="detail" class="detail-backdrop" @click.self="detail = null">
+      <div class="detail-panel">
+        <header class="detail-head">
+          <div>
+            <h3 class="detail-title">{{ detail.filename }}</h3>
+            <p class="detail-sub">
+              {{ detail.detections.length }} object(s)
+              <template v-if="detail.reading"> &bull; reads
+                <strong>{{ detail.reading }}</strong>
+              </template>
+            </p>
+          </div>
+          <button class="chosen-remove" @click="detail = null">
+            <Icon name="x" size="sm" />
+          </button>
+        </header>
+
+        <img :src="detail.annotated_image" :alt="detail.filename" class="detail-image" />
+
+        <table v-if="detail.detections.length" class="detail-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Label</th><th>Confidence</th>
+              <th>Box</th><th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(d, index) in detail.detections"
+              :key="index"
+              :class="{ 'row-uncertain': d.score < UNCERTAIN_BELOW }"
+            >
+              <td>{{ index + 1 }}</td>
+              <td class="detail-label">{{ d.label_name }}</td>
+              <td>{{ Math.round(d.score * 100) }}%</td>
+              <td class="detail-box">{{ d.box.join(', ') }}</td>
+              <td>
+                <span v-if="d.score < UNCERTAIN_BELOW">
+                  Below {{ UNCERTAIN_BELOW }} — check by eye
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="detail-empty">
+          Nothing above the threshold. Either the object is absent, or the model
+          missed it.
+        </p>
+      </div>
+    </div>
 </template>
 
 <script setup>
@@ -566,6 +635,48 @@ const readingOf = (detections) => {
 
 // Served as a file rather than fetched: the browser saves it directly, and a
 // long analysis is a large string that has no reason to pass through here.
+// The line under which a reading should be checked by a person before it is
+// acted on. The score threshold already decided what to report at all; this is
+// where a detector's own confidence stops being a majority.
+const UNCERTAIN_BELOW = 0.5
+
+const detail = ref(null)
+const exporting = ref(false)
+
+const openDetail = (item) => { detail.value = item }
+
+const uncertainCount = computed(() => results.value.reduce(
+  (total, item) => total + (item.detections || [])
+    .filter((d) => d.score < UNCERTAIN_BELOW).length, 0))
+
+const exportResults = async () => {
+  if (exporting.value || !results.value.length) return
+  exporting.value = true
+  error.value = ''
+  try {
+    const blob = await trainingService.exportTestResults({
+      results: results.value,
+      model_name: inferenceSummary.value?.model_name,
+      device: inferenceSummary.value?.device,
+      score_threshold: scoreThreshold.value
+    })
+    // Handed to the browser rather than opened here: it is a file to keep.
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${(inferenceSummary.value?.model_name || 'model')
+      .replace(/\.[^.]+$/, '')}_test.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    error.value = errorMessage(err, 'The spreadsheet could not be written')
+  } finally {
+    exporting.value = false
+  }
+}
+
 const csvUrl = computed(() =>
   videoJob.value?.id ? trainingService.videoCsvUrl(videoJob.value.id) : '')
 
@@ -855,6 +966,7 @@ onBeforeUnmount(() => {
 // ── Run inference ────────────────────────────────────────────────────
 const runTest = async () => {
   if (!canTest.value || loading.value) return
+  detail.value = null
   if (mode.value === 'video') { await runVideo(); return }
   loading.value = true
   error.value   = ''
@@ -1556,6 +1668,106 @@ const runTest = async () => {
   white-space:pre-line;
   user-select:text;
   cursor:text;
+}
+
+.result-card--clickable { cursor:pointer; }
+
+.result-card--clickable:hover {
+  border-color:var(--accent);
+}
+
+.rs-uncertain {
+  display:inline-flex;
+  align-items:center;
+  gap:0.35rem;
+  color:var(--warning-700);
+  font-size:0.82rem;
+}
+
+/* ── One result, large ─────────────────────────────────────────────── */
+.detail-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:60;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:2rem 1rem;
+  background:rgba(4, 6, 12, 0.72);
+  overflow-y:auto;
+}
+
+.detail-panel {
+  width:min(52rem, 100%);
+  max-height:100%;
+  overflow-y:auto;
+  padding:1.2rem 1.4rem 1.4rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-lg);
+  background:var(--surface);
+  box-shadow:var(--shadow-lg);
+}
+
+.detail-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1rem;
+  margin-bottom:0.9rem;
+}
+
+.detail-title {
+  margin:0;
+  color:var(--text-primary);
+  font-size:1rem;
+  word-break:break-all;
+}
+
+.detail-sub {
+  margin:0.2rem 0 0;
+  color:var(--text-secondary);
+  font-size:0.85rem;
+}
+
+.detail-image {
+  width:100%;
+  border-radius:var(--radius-md);
+  background:#05060a;
+}
+
+.detail-table {
+  width:100%;
+  margin-top:1rem;
+  border-collapse:collapse;
+  font-size:0.84rem;
+}
+
+.detail-table th {
+  padding:0.4rem 0.5rem;
+  border-bottom:1px solid var(--border-color);
+  color:var(--text-tertiary);
+  font-weight:600;
+  text-align:left;
+}
+
+.detail-table td {
+  padding:0.4rem 0.5rem;
+  border-bottom:1px solid var(--border-color);
+  color:var(--text-secondary);
+}
+
+.detail-label { color:var(--text-primary); font-weight:600; }
+.detail-box { font-family:var(--font-mono); font-size:0.78rem; }
+
+.row-uncertain td {
+  background:var(--warning-100);
+  color:var(--warning-700);
+}
+
+.detail-empty {
+  margin-top:1rem;
+  color:var(--text-secondary);
+  font-size:0.86rem;
 }
 
 .csv-link {

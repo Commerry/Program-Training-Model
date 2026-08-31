@@ -18,6 +18,11 @@ torch>=2.0
 torchvision>=0.15
 ultralytics>=8.2     # YOLOv8/9/10/11 and RT-DETR training
 
+# ── Reports ─────────────────────────────────────────────────────────────────
+# Writing .xlsx with the annotated images embedded in the sheet. Pillow above
+# is what openpyxl uses to place them.
+openpyxl>=3.1
+
 # ── Model export (optional but installed by default) ────────────────────────
 # The TorchScript ONNX exporter is used explicitly, so onnxscript (which the
 # newer dynamo exporter would pull in) is deliberately not required.

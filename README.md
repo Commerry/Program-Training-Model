@@ -517,6 +517,35 @@ rather than learning from it, and few images benefit from more passes, so a
 project under 60 annotated images is told to use yolo11n or yolo11s and to
 raise the epochs rather than accept the default.
 
+## A test run as a spreadsheet
+
+The results grid answers "did it work" while you are looking at it. Handing
+that answer to somebody else, or filing it beside a batch of parts, needs a
+file — and a file of numbers with no pictures is not evidence of anything.
+
+**Export to Excel** writes an `.xlsx` with the annotated images in the sheet,
+so a row can be read without opening anything else. Two sheets, because two
+questions get asked of it:
+
+| # | Image | File | Reading | Objects | Confidence | Lowest | Notes |
+|---|-------|------|---------|---------|------------|--------|-------|
+| 1 | *(picture)* | good.jpg | 250 | 3 | 91% | 88% | |
+| 2 | *(picture)* | unsure.jpg | 8 | 1 | 31% | 31% | Every detection is below 0.50: 8 at 0.31. Check by eye. |
+| 3 | *(picture)* | empty.jpg | | 0 | | | Nothing found. Either the object is absent or the model missed it. |
+
+The second sheet is one row per detection, for sorting and filtering.
+
+Three cases are kept apart rather than collapsed into a number, because they
+call for different actions: a clean read, something found but not confidently,
+and nothing found at all. Rows are coloured to match, and anything under 0.50
+is flagged in both sheets. That figure is not the score threshold — the
+threshold already decided what to report at all; this is the line under which a
+reading should be checked by a person before it is acted on.
+
+**Clicking a result opens it.** The grid says how the run went overall; the
+panel says exactly what the model claimed about one picture, which is the
+question asked of anything that looks wrong.
+
 ## Getting things out, and getting rid of them
 
 **A video analysis downloads as CSV.** The page draws the boxes over the clip,
@@ -796,6 +825,7 @@ python backend/tests/test_reading_order.py       # detections in reading order
 python backend/tests/test_model_is_usable.py     # trained weights actually detect
 python backend/tests/test_bulk_and_export.py     # bulk delete, and CSV export
 python backend/tests/test_import_batches.py      # one upload from another
+python backend/tests/test_report_export.py       # the spreadsheet, pictures and all
 python backend/tests/test_fine_tune.py           # continuing from a trained model
 python backend/tests/test_detect_and_accuracy.py # detect on one image, class accuracy
 python backend/tests/bench_scale.py              # timings against a 2232-image project

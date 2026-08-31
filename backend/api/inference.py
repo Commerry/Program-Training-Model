@@ -4,13 +4,14 @@ import csv
 import hashlib
 import io
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from flask import Blueprint, Response, request
 
 from api import login_required_api, ok
 from config import INSTANCE_DIR
-from services import inference, projects, training, videojob
+from services import inference, projects, report, training, videojob
 from services.projects import ProjectError
 
 inference_bp = Blueprint('inference', __name__)
@@ -198,6 +199,38 @@ def video_status(job_id):
 @inference_bp.post('/models/video/<job_id>/stop')
 def video_stop(job_id):
     return ok({'job': videojob.stop(job_id)})
+
+
+@inference_bp.post('/models/test/export')
+def export_test_results():
+    """
+    A finished test written out as a spreadsheet, with the pictures in it.
+
+    The results are posted back rather than looked up, because testing images
+    is stateless -- there is no run to refer to. That means the annotated
+    previews travel up as well as down, which is wasteful and is still the
+    smaller cost: the alternative is holding every test in memory on the chance
+    that somebody exports it.
+    """
+    data = request.get_json(silent=True) or {}
+    results = data.get('results')
+    if not isinstance(results, list):
+        raise ProjectError('Nothing to export')
+
+    workbook = report.build_workbook(results, meta={
+        'model_name': data.get('model_name'),
+        'device': data.get('device'),
+        'score_threshold': data.get('score_threshold'),
+    })
+
+    stem = str(data.get('model_name') or 'model').rsplit('.', 1)[0]
+    stamp = datetime.now().strftime('%Y%m%d_%H%M')
+    return Response(
+        workbook,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition':
+                 f'attachment; filename="{stem}_test_{stamp}.xlsx"'},
+    )
 
 
 @inference_bp.post('/models/video/<job_id>/csv')

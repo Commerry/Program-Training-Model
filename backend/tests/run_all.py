@@ -50,6 +50,8 @@ SUITES = [
      'deleting many images at once, and a video analysis as CSV'),
     ('import batches', TESTS / 'test_import_batches.py', False,
      'telling one upload from another, and labelling just the new one'),
+    ('report export', TESTS / 'test_report_export.py', False,
+     'a model test written out as a spreadsheet, pictures included'),
     ('fine tune', TESTS / 'test_fine_tune.py', True,
      'continuing from a trained model instead of starting over'),
     ('detect and accuracy', TESTS / 'test_detect_and_accuracy.py', True,
