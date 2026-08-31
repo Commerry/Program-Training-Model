@@ -156,30 +156,30 @@
           <div class="form-group">
             <label class="form-label">Model Architecture</label>
             <select v-model="trainingConfig.model_type" class="form-select" @change="onModelTypeChange">
-              <optgroup label="YOLO — แนะนำ (เร็วกว่าราว 20 เท่า)">
-                <option value="yolo11n">YOLO11n — Nano (เร็วที่สุด, RAM น้อย)</option>
-                <option value="yolo11s">YOLO11s — Small (เร็ว, แนะนำสำหรับตัวเลข)</option>
-                <option value="yolo11m">YOLO11m — Medium (สมดุล)</option>
-                <option value="yolo11l">YOLO11l — Large (accuracy สูง)</option>
+              <optgroup label="YOLO — recommended (about 20x faster)">
+                <option value="yolo11n">YOLO11n — Nano (fastest, least memory)</option>
+                <option value="yolo11s">YOLO11s — Small (fast, a good default)</option>
+                <option value="yolo11m">YOLO11m — Medium (balanced)</option>
+                <option value="yolo11l">YOLO11l — Large (most accurate)</option>
                 <option value="yolov8n">YOLOv8n — Nano</option>
                 <option value="yolov8s">YOLOv8s — Small</option>
                 <option value="yolov8m">YOLOv8m — Medium</option>
               </optgroup>
-              <optgroup label="PyTorch Faster R-CNN — ช้ากว่ามาก">
+              <optgroup label="PyTorch Faster R-CNN — far slower">
                 <option value="faster_rcnn">Faster R-CNN ResNet50-FPN</option>
               </optgroup>
             </select>
             <p class="form-hint model-note" v-if="isYoloModel">
               <Icon name="zap" size="xs" />
               <span>
-                ราว 5-15 นาทีต่อ epoch บน GPU — export เป็น
-                <strong>.pt</strong> แล้วแปลงเป็น blob สำหรับกล้อง Luxonis ได้
+                Roughly 5-15 minutes per epoch on a GPU. Exports as
+                <strong>.pt</strong>, which can be converted to a blob for Luxonis cameras.
               </span>
             </p>
             <p class="form-hint model-note is-warning" v-else>
               <Icon name="alert-triangle" size="xs" />
               <span>
-                ช้ากว่ามาก ราว 1.7 ชั่วโมงต่อ epoch — 100 epoch ใช้เวลาราว 170 ชั่วโมง
+                Far slower: roughly 1.7 hours per epoch, so 100 epochs is about 170 hours.
               </span>
             </p>
           </div>
@@ -242,9 +242,9 @@
           </div>
 
           <div v-if="continuableModels.length" class="form-group">
-            <label class="form-label">เริ่มจากโมเดลที่มีอยู่</label>
+            <label class="form-label">Start from an existing model</label>
             <select v-model="baseModel" class="form-input">
-              <option :value="''">เริ่มใหม่จากศูนย์ (COCO)</option>
+              <option :value="''">Start from scratch (COCO)</option>
               <option
                 v-for="model in continuableModels"
                 :key="model.path"
@@ -253,18 +253,20 @@
             </select>
             <p class="form-hint">
               <template v-if="baseModel">
-                โมเดลนี้รู้จักวัตถุอยู่แล้ว เหลือแค่เรียนว่าที่นี่หน้าตาเป็นยังไง
-                — ใช้ภาพน้อยกว่ามากและเร็วกว่า เหมาะกับการขยายไปโรงงานใหม่
+                This model already knows the object; it only has to learn what it
+                looks like here. Far fewer images and far less time, which is
+                what makes taking it to another site practical.
               </template>
               <template v-else>
-                เริ่มจากศูนย์ต้องใช้ภาพหลักพันและเวลานาน
-                ถ้าเคยเทรนงานเดียวกันไว้แล้วให้เลือกโมเดลนั้นแทน
-                จะใช้ภาพหลักสิบก็พอ
+                Starting from scratch needs thousands of images and hours. If you
+                have already trained this job somewhere, continue from that
+                model instead and tens of images will do.
               </template>
             </p>
             <p class="form-hint">
-              เลือกได้เฉพาะ <code>.pt</code> — ไฟล์ ONNX เป็นกราฟที่คอมไพล์แล้ว
-              เทรนต่อไม่ได้ เก็บ <code>.pt</code> ของทุกโรงงานไว้เสมอ
+              Only <code>.pt</code> can be continued. An ONNX export is a compiled
+              graph with no trainable head, so keep the <code>.pt</code> from
+              every site.
             </p>
           </div>
 
@@ -281,10 +283,10 @@
               <label class="aug-toggle">
                 <input type="checkbox" v-model="mirrorImages" />
                 <span>
-                  พลิกภาพซ้าย-ขวาระหว่างเทรน
+                  Mirror images left to right while training
                   <small>
-                    เปิดได้ถ้าวัตถุพลิกแล้วยังเป็นสิ่งเดิม
-                    ปิดไว้ถ้าคลาสเป็นตัวเลขหรือตัวอักษร
+                    Safe when a mirrored object is still the same object. Leave it off
+                    when the classes are digits or letters.
                   </small>
                 </span>
               </label>
@@ -292,10 +294,10 @@
               <label class="aug-toggle">
                 <input type="checkbox" v-model="generateFilters" />
                 <span>
-                  สร้างภาพเพิ่มด้วยฟิลเตอร์ก่อนเทรน
+                  Generate filtered copies before training
                   <small>
-                    เขียนไฟล์ภาพใหม่จากรูปที่ตีกรอบไว้ ใช้กรอบ ROI เดิม
-                    เหมาะเมื่อมีภาพน้อย
+                    Writes new image files from the ones you annotated, reusing their
+                    boxes. Worth it when you have few images.
                   </small>
                 </span>
               </label>
@@ -312,32 +314,33 @@
               </div>
 
               <p v-if="generateFilters" class="form-hint">
-                {{ chosenPresets.length }} ฟิลเตอร์ ×
-                {{ augAdvice.annotated_images }} ภาพที่ตีกรอบ =
+                {{ chosenPresets.length }} filters ×
+                {{ augAdvice.annotated_images }} annotated images =
                 <strong>{{ chosenPresets.length * augAdvice.annotated_images }}</strong>
-                ภาพใหม่ แต่ละ epoch จะใช้เวลานานขึ้นตามจำนวนภาพ
-                ฟิลเตอร์ที่ทำให้วัตถุในกรอบหายไปจะถูกทิ้งอัตโนมัติ
+                new images. Every epoch takes longer in proportion. A filter that
+                hides the object inside a box is dropped automatically.
               </p>
               <p v-else class="form-hint">
-                ระบบปรับสี ความสว่าง ตำแหน่งและขนาดให้ใหม่ทุก epoch อยู่แล้ว
-                โดยไม่กินพื้นที่ ตัวเลือกนี้ไว้สำหรับฟิลเตอร์เชิงโครงสร้าง
-                ที่การเทรนไม่ได้ทำให้ เช่น เส้นขอบและการแยกขาวดำ
+                Colour, brightness, position and scale are already varied fresh
+                every epoch at no cost in disk. This is for the structural
+                filters training does not do at all, such as edge maps and
+                thresholding.
               </p>
             </div>
           </div>
 
           <div v-if="loaderAdvice" class="form-group">
-            <label class="form-label">ความเร็วในการป้อนภาพ</label>
+            <label class="form-label">Feeding the GPU</label>
             <div class="aug-panel">
               <label class="sample-row">
-                <span>โปรเซสที่เตรียมภาพให้ GPU</span>
+                <span>Loader processes</span>
                 <input v-model.number="loaderWorkers" type="range" min="0" max="12" step="1" />
                 <strong>{{ loaderWorkers }}</strong>
               </label>
 
               <p class="form-hint">
-                ถ้าเทรนแล้ว<strong>ไม่ถึง epoch 1 สักที</strong> ให้ตั้งโปรเซสเป็น 0
-                นั่นคืออาการเดียวที่ค่านี้ทำให้เกิดได้ และแก้ได้ทันที
+                If a run <strong>never reaches epoch 1</strong>, set this back to 0.
+                That is the only failure it can cause, and it is immediate.
               </p>
             </div>
           </div>
@@ -427,7 +430,7 @@
         <div v-if="baseInfo" class="self-check">
           <Icon name="box" size="sm" />
           <span>
-            ต่อยอดจาก <strong>{{ baseInfo.name }}</strong>
+            Continued from <strong>{{ baseInfo.name }}</strong>
             <template v-if="baseClasses"> — {{ baseClasses.note }}</template>
           </span>
         </div>
@@ -435,27 +438,30 @@
         <div v-if="selfCheck" class="self-check" :class="{ 'self-check--bad': !selfCheck.usable }">
           <Icon :name="selfCheck.usable ? 'check-circle' : 'alert-triangle'" size="sm" />
           <span v-if="selfCheck.usable">
-            ตรวจสอบตัวเอง: เจอ {{ selfCheck.detections }} วัตถุ
-            บน {{ selfCheck.images_with_detections }}/{{ selfCheck.images_checked }}
-            ภาพ validation (สูงสุด {{ selfCheck.best_score }})
+            Self-check: found {{ selfCheck.detections }} object(s) on
+            {{ selfCheck.images_with_detections }}/{{ selfCheck.images_checked }}
+            validation images (best {{ selfCheck.best_score }})
           </span>
           <span v-else>
-            <strong>โมเดลนี้ตรวจจับอะไรไม่ได้เลย</strong> —
-            ลองกับภาพ validation {{ selfCheck.images_checked }} ภาพของตัวเอง
-            ที่ threshold {{ selfCheck.threshold }} ไม่เจอสักชิ้น
-            ตัวเลข mAP ด้านบนวัดการ<em>จัดอันดับ</em> ไม่ได้วัดว่าความมั่นใจสูงพอใช้งาน
-            ถ้าภาพน้อยให้เพิ่มภาพและ epoch แล้วเทรนใหม่
+            <strong>These weights detect nothing.</strong> Tried against
+            {{ selfCheck.images_checked }} of this run's own validation images
+            at {{ selfCheck.threshold }} and found not one object. The mAP above
+            measures <em>ranking</em>, not whether the confidences are high
+            enough to use. With few images, add more and more epochs, then train
+            again.
           </span>
         </div>
 
         <div v-if="selfCheck && selfCheck.alternative" class="self-check">
           <Icon name="check-circle" size="sm" />
           <span>
-            แต่ <strong>{{ selfCheck.alternative.name }}</strong> จากรอบเดียวกันใช้ได้ —
-            เจอบน {{ selfCheck.alternative.images_with_detections }}/{{
-              selfCheck.alternative.images_checked }} ภาพ
-            (สูงสุด {{ selfCheck.alternative.best_score }})
-            ให้เลือกไฟล์นี้แทน <code>best.pt</code> ตอนทดสอบหรือ fine-tune
+            But <strong>{{ selfCheck.alternative.name }}</strong> from the same
+            run does work — found on
+            {{ selfCheck.alternative.images_with_detections }}/{{
+              selfCheck.alternative.images_checked }} images
+            (best {{ selfCheck.alternative.best_score }}).
+            Use that file rather than <code>best.pt</code> for testing or
+            fine-tuning.
           </span>
         </div>
 
@@ -475,7 +481,7 @@
                 <Icon name="download" size="sm" /> {{ fmtLabel(fmt) }}
               </a>
             </template>
-            <span v-else class="text-muted" style="font-size:0.85rem">ไม่มีไฟล์ export (ดู log)</span>
+            <span v-else class="text-muted" style="font-size:0.85rem">No exported files — check the log</span>
           </div>
         </div>
 

@@ -32,7 +32,7 @@
           class="toolbar-select"
           title="Model to detect with"
         >
-          <option :value="''">เลือกโมเดล…</option>
+          <option :value="''">Choose a model…</option>
           <option v-for="model in detectModels" :key="model.path" :value="model.path">
             {{ model.project }} / {{ model.label }}
           </option>

@@ -151,6 +151,25 @@ def detect_on_image(project_name, filename):
     })
 
 
+@projects_bp.post('/<project_name>/auto-label/preview')
+def preview_auto_label(project_name):
+    """
+    Try the model on a few images and report what it would draw. Writes nothing.
+
+    The pass itself only touches unlabelled images, so on a project that is
+    already fully annotated there was no way to find out whether a model was
+    worth using short of letting it overwrite work drawn by hand.
+    """
+    data = request.get_json(silent=True) or {}
+    return ok(autolabel.preview(
+        project_name,
+        model_path=data.get('model_path'),
+        score_threshold=data.get('score_threshold', 0.4),
+        sample=data.get('sample', 5),
+        batch=data.get('batch'),
+    ))
+
+
 @projects_bp.get('/<project_name>/class-accuracy')
 def class_accuracy(project_name):
     """How well the newest finished run did on each class."""

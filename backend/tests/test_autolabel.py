@@ -104,6 +104,42 @@ for e in (j.get('errors') or []): print('   ERROR:', e)
 check('job completed', j['status'] == 'completed', j.get('error'))
 check('it labelled something', j['labelled'] > 0, j)
 
+print('\n== trying it without writing anything ==')
+# The pass only touches unlabelled images, so on a project that is already
+# fully annotated there was no way to find out whether a model was worth using
+# short of letting it overwrite work drawn by hand.
+def region_counts(subset):
+    return {
+        name: len(json.loads(
+            (Path(os.environ['PROJECTS_ROOT']) / 'auto' / 'annotations' /
+             f'{name}.json').read_text(encoding='utf-8')).get('regions', []))
+        for name in subset
+    }
+
+
+before_counts = region_counts(names[:LABELLED])
+
+r = c.post('/api/projects/auto/auto-label/preview',
+           json={'score_threshold': 0.25, 'sample': 4})
+preview = r.get_json()
+check('the preview ran', r.status_code == 200, preview)
+check('it looked at some images', len(preview.get('results', [])) > 0, preview)
+check('it names the model it used', bool(preview.get('model_name')),
+      preview.get('model_name'))
+check('and gives a verdict in words', len(preview.get('verdict', '')) > 30,
+      preview.get('verdict'))
+
+rows = preview.get('results', [])
+check('it prefers images drawn by hand, so there is something to compare against',
+      all(row.get('drawn_by_hand') for row in rows),
+      [(row['filename'], row.get('drawn_by_hand')) for row in rows])
+check('and reports what the model found on each',
+      all('model_found' in row for row in rows), rows[:1])
+
+check('nothing on disk changed', region_counts(names[:LABELLED]) == before_counts,
+      [k for k, v in region_counts(names[:LABELLED]).items()
+       if before_counts[k] != v])
+
 print('\n== the predictions are real annotations ==')
 after = c.get('/api/projects/auto/dataset-summary').get_json()
 check('annotated count grew', after['annotated_images'] > 20, after['annotated_images'])

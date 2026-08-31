@@ -109,6 +109,86 @@ def _resolve_model(name, model_path=None):
     return path
 
 
+def preview(name, model_path=None, score_threshold=0.4, img_size=None,
+            sample=5, batch=None):
+    """
+    Run the model over a few images and report what it would draw. Write nothing.
+
+    Asking "does auto-labelling work here" used to be unanswerable on a project
+    that was already fully annotated: the pass only touches unlabelled images,
+    so it refused with nothing to do, and the only way to see the model's
+    output was to let it overwrite work drawn by hand. That is a bad trade for
+    a question this cheap to answer.
+
+    Prefers images that already have boxes, because those come with the answer:
+    what a person drew is right there to compare against.
+    """
+    projects.get_project(name)
+    weights = _resolve_model(name, model_path)
+
+    try:
+        score_threshold = min(max(float(score_threshold), 0.05), 0.95)
+    except (TypeError, ValueError):
+        score_threshold = 0.4
+
+    run = _run_for_weights(name, weights)
+    if not img_size:
+        img_size = (run or {}).get('img_size') or 640
+    img_size = max(64, min(int(img_size), 2048))
+
+    entries = [e for e in projects.list_images(name) if not e['augmented']]
+    if batch is not None:
+        try:
+            entries = [e for e in entries if e.get('batch') == int(batch)]
+        except (TypeError, ValueError):
+            pass
+    if not entries:
+        raise ProjectError('No photographs to try it on.')
+
+    # Annotated first: those are the ones a prediction can be judged against.
+    entries.sort(key=lambda e: (not e['annotated'], e['filename']))
+    entries = entries[:max(1, min(int(sample), 20))]
+
+    classes = _classes_for(name, weights)
+    predict = _make_predictor(weights, img_size, score_threshold)
+
+    results = []
+    for entry in entries:
+        path = projects.images_dir(name) / entry['filename']
+        try:
+            found = predict(path, classes)
+        except Exception as exc:  # noqa: BLE001 - one bad image is not fatal
+            results.append({'filename': entry['filename'], 'error': str(exc)})
+            continue
+        results.append({
+            'filename': entry['filename'],
+            'drawn_by_hand': entry['regions_count'],
+            'model_found': len(found),
+            'best_score': round(max((r['score'] for r in found), default=0.0), 4),
+            'tags': sorted({r['tag'] for r in found}),
+        })
+
+    with_something = [r for r in results if r.get('model_found')]
+    if not with_something:
+        verdict = (f'Found nothing on any of {len(results)} image(s) above '
+                   f'{score_threshold:.2f}. Either this model has not learned '
+                   'these objects, or the threshold is too high.')
+    else:
+        verdict = (f'Found objects on {len(with_something)} of {len(results)} '
+                   f'image(s). Compare the counts below against what was drawn '
+                   'by hand before letting it label the rest.')
+
+    return {
+        'model': str(weights),
+        'model_name': Path(weights).name,
+        'score_threshold': score_threshold,
+        'img_size': img_size,
+        'results': results,
+        'verdict': verdict,
+        'usable': bool(with_something),
+    }
+
+
 def start(name, model_path=None, score_threshold=0.4, overwrite=False,
           only_unannotated=True, img_size=None, limit=None, batch=None):
     """

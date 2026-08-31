@@ -409,6 +409,31 @@ fields that describe where an image came from — its batch, when it arrived,
 its original filename, whether a model drew it — now survive a save. Only the
 boxes and the dimensions are the save's to own.
 
+## Finding out whether auto-labelling would work
+
+Auto-labelling only touches images that have no boxes yet, which is right when
+it is doing the work and wrong when the question is whether it can. On a
+project that is already fully annotated it had nothing to do and refused,
+and the only way to see the model's output was to let it overwrite work drawn
+by hand.
+
+**Try it first** runs the model over a few images and reports what it would
+draw, writing nothing. It prefers images that already have boxes, because those
+come with the answer to compare against:
+
+```
+Image                     Drawn by hand   Model found   Best score
+20260827_...0000.jpg            2              0           -
+20260827_...0001.jpg            3              0           -
+
+Found nothing on any of 4 images above 0.25. Either this model has not
+learned these objects, or the threshold is too high.
+```
+
+There is also an explicit **Also re-label images that already have boxes**,
+which does replace them — the destructive option, next to the one that answers
+the same question for free.
+
 ## Trying a model on one image
 
 The annotate screen has a **Detect** button (or `F`) beside a model chooser. It
@@ -815,6 +840,12 @@ It needs a build to be present (`cd frontend && npm run build`).
 request against a budget.
 
 ## Appearance
+
+The interface is in English throughout. Some screens carried Thai for a while;
+none do now, and three files also had their comment separators repaired, where
+box-drawing characters had been mangled into Thai code points by a round trip
+through the wrong encoding.
+
 
 The interface is dark by default. Every colour, radius, shadow and easing is a
 token in `frontend/src/assets/styles/main.css`; views reference tokens rather

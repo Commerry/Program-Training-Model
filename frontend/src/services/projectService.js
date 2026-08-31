@@ -70,6 +70,10 @@ export const projectService = {
       .post(`${base(name)}/images/${encodeURIComponent(filename)}/detect`, options)
       .then((r) => r.data),
 
+  /** Try a model on a few images and report what it would draw. Writes nothing. */
+  previewAutoLabel: (name, options) =>
+    http.post(`${base(name)}/auto-label/preview`, options).then((r) => r.data),
+
   classAccuracy: (name) =>
     http.get(`${base(name)}/class-accuracy`).then((r) => r.data),
 

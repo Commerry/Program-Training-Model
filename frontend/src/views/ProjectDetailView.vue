@@ -111,7 +111,7 @@
         <h3 class="section-title">
           <Icon name="command" size="sm" />
           Auto-label with a trained model
-          <span class="section-tip">ให้โมเดลที่เทรนแล้วตีกรอบให้ก่อน แล้วค่อยแก้</span>
+          <span class="section-tip">Let a trained model draw the boxes first, then correct them</span>
         </h3>
         <p class="augment-desc">
           Runs a trained model over every image that has no annotations yet and
@@ -132,17 +132,17 @@
           </label>
 
           <label v-if="batches.length > 1" class="augment-field">
-            <span>เฉพาะชุดที่นำเข้า</span>
+            <span>Limit to one upload</span>
             <select v-model="autoLabelBatch" class="form-input">
-              <option :value="''">ทุกภาพที่ยังไม่ตีกรอบ</option>
+              <option :value="''">Everything unlabelled</option>
               <option v-for="entry in batches" :key="entry.batch" :value="entry.batch">
-                {{ entry.batch === 0 ? 'ชุดแรก' : `ชุดที่ ${entry.batch}` }}
-                — {{ entry.pending }} ภาพยังไม่ตีกรอบ
+                {{ entry.batch === 0 ? 'First upload' : `Upload ${entry.batch}` }}
+                — {{ entry.pending }} unlabelled
               </option>
             </select>
             <small>
-              ภาพเก่าที่เคยข้ามไว้ก็ยังนับว่ายังไม่ตีกรอบ
-              เลือกชุดล่าสุดถ้าต้องการทำเฉพาะภาพที่เพิ่งเพิ่ม
+              Images skipped long ago still count as unlabelled. Pick the newest
+              upload to work only on what you just added.
             </small>
           </label>
 
@@ -203,6 +203,38 @@
           {{ autoLabelJob.error }}
         </p>
 
+        <label class="autolabel-overwrite">
+          <input type="checkbox" v-model="autoLabelOverwrite" />
+          <span>
+            Also re-label images that already have boxes
+            <small>
+              Replaces what is there, including boxes drawn by hand. Use
+              <strong>Try it first</strong> below to see what the model would
+              draw without changing anything.
+            </small>
+          </span>
+        </label>
+
+        <div v-if="autoLabelPreview" class="autolabel-preview">
+          <p class="preview-verdict" :class="{ 'preview-verdict--bad': !autoLabelPreview.usable }">
+            <Icon :name="autoLabelPreview.usable ? 'check-circle' : 'alert-triangle'" size="sm" />
+            {{ autoLabelPreview.verdict }}
+          </p>
+          <table class="preview-table">
+            <thead>
+              <tr><th>Image</th><th>Drawn by hand</th><th>Model found</th><th>Best score</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in autoLabelPreview.results" :key="row.filename">
+                <td class="preview-file" :title="row.filename">{{ row.filename }}</td>
+                <td>{{ row.drawn_by_hand ?? '-' }}</td>
+                <td :class="{ 'preview-none': !row.model_found }">{{ row.model_found ?? '-' }}</td>
+                <td>{{ row.best_score || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
         <div class="augment-actions">
           <button
             v-if="!autoLabelRunning"
@@ -230,7 +262,7 @@
           Generate Color Variants
         </h3>
         <p class="augment-desc">
-          สร้างภาพหลายโทนสีจากรูปเดิมเพื่อเพิ่มข้อมูลเทรน โดยใช้ตำแหน่ง ROI เดิมอัตโนมัติ (ไม่ต้องตีกรอบใหม่)
+          Generates colour and contrast variants of the images you annotated, reusing their boxes. Nothing has to be drawn again.
         </p>
 
         <div class="augment-controls">
@@ -246,7 +278,7 @@
           </label>
 
           <div class="augment-field augment-auto-note">
-            <span>Filters (26 ฟิลเตอร์อัตโนมัติ)</span>
+            <span>Filters (26 applied automatically)</span>
             <div class="filter-groups">
               <div v-for="group in filterGroups" :key="group.label" class="filter-group">
                 <span class="filter-group-head">
@@ -261,6 +293,14 @@
 
         <div class="augment-actions">
           <button
+            class="btn btn-secondary"
+            :disabled="autoLabelTrying"
+            @click="tryAutoLabel"
+          >
+            <Icon name="search" size="sm" />
+            <span>{{ autoLabelTrying ? 'Trying...' : 'Try it first' }}</span>
+          </button>
+          <button
             class="btn btn-primary"
             :disabled="!canGenerateVariants || augmenting"
             @click="generateColorVariants"
@@ -269,27 +309,28 @@
             <span>{{ augmenting ? 'Generating...' : 'Generate Color Variants' }}</span>
           </button>
           <span v-if="!isFullyAnnotated" class="augment-warning">
-            ต้อง Annotate ให้ครบก่อน ({{ annotatedCount }}/{{ totalCount }})
+            Annotate everything first ({{ annotatedCount }}/{{ totalCount }})
           </span>
           <span v-else class="augment-ok">
-            พร้อมสร้างภาพเพิ่ม (ROI เดิมจะถูกคัดลอกไปภาพใหม่)
+            Ready — the existing boxes are copied onto every new image
           </span>
         </div>
 
         <div v-if="augmentReport" class="augment-report">
           <p class="augment-report-line">
             <Icon name="check-circle" size="sm" />
-            สร้างแล้ว {{ augmentReport.created }} จาก {{ augmentReport.planned }} ภาพ
+            Created {{ augmentReport.created }} of {{ augmentReport.planned }} images
           </p>
           <div v-if="augmentReport.dropped.length" class="augment-report-dropped">
             <p>
               <Icon name="alert-triangle" size="sm" />
-              ฟิลเตอร์เหล่านี้ทำให้วัตถุในกรอบ ROI หายไป จึงไม่ถูกบันทึก
-              (ภาพที่ label ชี้ไปยังพื้นที่ว่างจะทำให้โมเดลเรียนผิด)
+              These filters hid the object inside the box, so they were not kept.
+              An image whose label points at blank background teaches the
+              detector the wrong thing.
             </p>
             <ul>
               <li v-for="[tone, count] in augmentReport.dropped" :key="tone">
-                <code>{{ tone }}</code> &mdash; {{ count }} ภาพ
+                <code>{{ tone }}</code> &mdash; {{ count }} images
               </li>
             </ul>
           </div>
@@ -328,12 +369,12 @@
         <div v-if="accuracy && accuracy.run" class="accuracy-note">
           <Icon name="chart-bar" size="sm" />
           <span>
-            ความแม่นยำจากรอบ <strong>{{ accuracy.run }}</strong>
+            Accuracy from run <strong>{{ accuracy.run }}</strong>
             <template v-if="accuracy.overall">
-              (รวม {{ Math.round(accuracy.overall * 100) }}%)
+              ({{ Math.round(accuracy.overall * 100) }}% overall)
             </template>
             <template v-if="accuracy.measured_at">
-              เมื่อ {{ formatDateTime(accuracy.measured_at) }}
+              on {{ formatDateTime(accuracy.measured_at) }}
             </template>
             <template v-if="accuracy.note"> — {{ accuracy.note }}</template>
           </span>
@@ -365,12 +406,12 @@
             </button>
           </div>
           <label v-if="batches.length > 1" class="roi-toggle" title="Which upload">
-            <span>ชุดที่นำเข้า</span>
+            <span>Upload</span>
             <select v-model="batchFilter" class="batch-select">
-              <option value="">ทุกชุด</option>
+              <option value="">All uploads</option>
               <option v-for="entry in batches" :key="entry.batch" :value="entry.batch">
-                {{ entry.batch === 0 ? 'ชุดแรก' : `ชุดที่ ${entry.batch}` }}
-                — {{ entry.photos }} รูปถ่าย{{ entry.pending ? `, ${entry.pending} ยังไม่ตีกรอบ` : '' }}
+                {{ entry.batch === 0 ? 'First upload' : `Upload ${entry.batch}` }}
+                — {{ entry.photos }} photos{{ entry.pending ? `, ${entry.pending} unlabelled` : '' }}
               </option>
             </select>
           </label>
@@ -390,7 +431,7 @@
             @click="deleteGenerated"
           >
             <Icon name="trash" size="sm" />
-            {{ deletingImages ? 'กำลังลบ...' : `ลบภาพที่ฟิลเตอร์สร้าง (${generatedCount})` }}
+            {{ deletingImages ? 'Deleting...' : `Delete filtered copies (${generatedCount})` }}
           </button>
 
           <div v-if="pageCount > 1" class="pager">
@@ -510,10 +551,10 @@
                 -->
                 <span v-if="image.augmented" class="badge badge-filter">
                   <Icon name="zap" size="xs" />
-                  ฟิลเตอร์
+                  Filtered
                 </span>
                 <span v-if="batches.length > 1" class="badge badge-batch">
-                  {{ (image.batch ?? 0) === 0 ? 'ชุดแรก' : `ชุดที่ ${image.batch}` }}
+                  {{ (image.batch ?? 0) === 0 ? 'Upload 1' : `Upload ${image.batch}` }}
                 </span>
               </div>
               
@@ -686,7 +727,7 @@ const actionError = ref(null)
 const filterGroups = [
   {
     icon: 'image',
-    label: 'สี',
+    label: 'Colour',
     items: 'warm, cool, bright, dark, vivid, sepia, high_contrast, invert'
   },
   {
@@ -697,7 +738,7 @@ const filterGroups = [
   },
   {
     icon: 'square',
-    label: 'Contour / Edge (เน้นเลขชัด)',
+    label: 'Contour / edge (sharpens characters)',
     items: 'canny_overlay, contour_inv, laplacian, sobel, emboss, clahe_sharp'
   }
 ]
@@ -765,6 +806,37 @@ const autoLabelModel = ref('')
 // images to an existing project, "the ones I just added" is almost always what
 // is meant, and a few pictures skipped months ago are still unlabelled.
 const autoLabelBatch = ref('')
+const autoLabelOverwrite = ref(false)
+const autoLabelPreview = ref(null)
+const autoLabelTrying = ref(false)
+
+/**
+ * Run the model over a few images and show what it would draw.
+ *
+ * The pass itself only touches unlabelled images, so on a project that is
+ * already fully annotated there was no way to find out whether a model was
+ * worth using short of letting it overwrite work drawn by hand. This writes
+ * nothing, and prefers annotated images because those come with the answer to
+ * compare against.
+ */
+const tryAutoLabel = async () => {
+  if (autoLabelTrying.value) return
+  autoLabelTrying.value = true
+  actionError.value = null
+  autoLabelPreview.value = null
+  try {
+    autoLabelPreview.value = await projectService.previewAutoLabel(projectName.value, {
+      model_path: autoLabelModel.value || undefined,
+      score_threshold: autoLabelThreshold.value,
+      batch: autoLabelBatch.value === '' ? undefined : Number(autoLabelBatch.value),
+      sample: 5
+    })
+  } catch (error) {
+    actionError.value = errorMessage(error)
+  } finally {
+    autoLabelTrying.value = false
+  }
+}
 
 const autoLabelTargetCount = computed(() => {
   const pending = store.images.filter((i) => !i.annotated && !i.augmented)
@@ -819,11 +891,11 @@ watch(showRoi, (value) => {
 const imageFilters = computed(() => {
   const images = store.images
   return [
-    { value: 'all', label: 'ทั้งหมด', count: images.length },
-    { value: 'photos', label: 'รูปถ่ายจริง', count: images.filter((i) => !i.augmented).length },
-    { value: 'augmented', label: 'จากฟิลเตอร์', count: images.filter((i) => i.augmented).length },
-    { value: 'annotated', label: 'ตีกรอบแล้ว', count: images.filter((i) => i.annotated).length },
-    { value: 'pending', label: 'ยังไม่ตีกรอบ', count: images.filter((i) => !i.annotated).length }
+    { value: 'all', label: 'All', count: images.length },
+    { value: 'photos', label: 'Photos', count: images.filter((i) => !i.augmented).length },
+    { value: 'augmented', label: 'Filtered', count: images.filter((i) => i.augmented).length },
+    { value: 'annotated', label: 'Annotated', count: images.filter((i) => i.annotated).length },
+    { value: 'pending', label: 'Pending', count: images.filter((i) => !i.annotated).length }
   ]
 })
 
@@ -966,7 +1038,8 @@ const startAutoLabel = async () => {
   try {
     const { job } = await projectService.startAutoLabel(projectName.value, {
       score_threshold: autoLabelThreshold.value,
-      only_unannotated: true,
+      only_unannotated: !autoLabelOverwrite.value,
+      overwrite: autoLabelOverwrite.value,
       batch: autoLabelBatch.value === '' ? undefined : Number(autoLabelBatch.value),
       // Empty means the project's own best run; the server decides then.
       model_path: autoLabelModel.value || undefined
@@ -2050,6 +2123,79 @@ const truncateFilename = (filename, maxLength = 20) => {
   font-weight: 400;
   color: var(--text-3);
 }
+
+.autolabel-overwrite {
+  display:flex;
+  align-items:flex-start;
+  gap:0.6rem;
+  margin:0.8rem 0 0.4rem;
+  cursor:pointer;
+}
+
+.autolabel-overwrite input { margin-top:0.25rem; }
+
+.autolabel-overwrite span {
+  display:flex;
+  flex-direction:column;
+  gap:0.15rem;
+  color:var(--text-primary);
+  font-size:0.88rem;
+}
+
+.autolabel-overwrite small {
+  color:var(--text-tertiary);
+  font-size:0.78rem;
+  line-height:1.55;
+}
+
+.autolabel-preview {
+  margin:0.8rem 0;
+  padding:0.8rem 0.9rem;
+  border:1px solid var(--border-color);
+  border-radius:var(--radius-md);
+  background:var(--surface-2);
+}
+
+.preview-verdict {
+  display:flex;
+  align-items:flex-start;
+  gap:0.5rem;
+  margin:0 0 0.6rem;
+  color:var(--success-700);
+  font-size:0.86rem;
+  line-height:1.6;
+}
+
+.preview-verdict--bad { color:var(--danger-700); }
+
+.preview-table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:0.8rem;
+}
+
+.preview-table th {
+  padding:0.25rem 0.4rem;
+  border-bottom:1px solid var(--border-color);
+  color:var(--text-tertiary);
+  font-weight:600;
+  text-align:left;
+}
+
+.preview-table td {
+  padding:0.25rem 0.4rem;
+  color:var(--text-secondary);
+  font-family:var(--font-mono);
+}
+
+.preview-file {
+  max-width:16rem;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.preview-none { color:var(--danger-600); font-weight:700; }
 
 .autolabel-count {
   font-size: var(--fs-lg);

@@ -9,7 +9,7 @@
         </div>
         <div>
           <h1 class="page-title">Model Test Tool</h1>
-          <p class="page-sub">ทดสอบโมเดลที่เทรนแล้วโดยการ import รูปและดูผล ROI</p>
+          <p class="page-sub">Run a trained model over images, a video, or the camera</p>
         </div>
       </div>
       <div v-if="inferenceSummary" class="summary-chips">
@@ -20,7 +20,7 @@
           <Icon name="server" size="sm" /> {{ inferenceSummary.device }}
         </span>
         <span class="chip chip-green">
-          <Icon name="image" size="sm" /> {{ inferenceSummary.total }} รูป
+          <Icon name="image" size="sm" /> {{ inferenceSummary.total }} images
         </span>
       </div>
     </header>
@@ -52,7 +52,7 @@
         <div class="step-block">
           <div class="step-head">
             <div class="step-num">1</div>
-            <span>เลือกโมเดล</span>
+            <span>Choose a model</span>
           </div>
           <label
             class="drop-zone"
@@ -63,7 +63,7 @@
             <input ref="modelInput" type="file" accept=".pth,.pt,.onnx,.torchscript" class="hidden-input" @change="onModelChange" />
             <div v-if="!modelFile" class="dz-inner">
               <Icon name="upload" size="lg" />
-              <span class="dz-title">คลิก หรือ ลากไฟล์โมเดลมาวาง</span>
+              <span class="dz-title">Click, or drop a model file here</span>
               <span class="dz-hint">.pth &bull; .pt &bull; .onnx &bull; .torchscript</span>
             </div>
             <div v-else class="dz-chosen">
@@ -87,7 +87,7 @@
           <div v-if="trainedModels.length" class="trained-picker">
             <div class="trained-head">
               <Icon name="box" size="sm" />
-              <span>หรือเลือกโมเดลที่เทรนไว้แล้วในระบบ</span>
+              <span>Or pick one this server has already trained</span>
             </div>
             <ul class="trained-list">
               <li v-for="model in trainedModels" :key="model.path">
@@ -119,13 +119,13 @@
             <span>Label Names <span class="optional">(optional)</span></span>
           </div>
           <div v-if="resolvedLabelSource" class="label-hint">
-            ใช้ชื่อคลาสจากโมเดลอัตโนมัติ: {{ resolvedLabelSource }}
+            Class names taken from the model: {{ resolvedLabelSource }}
           </div>
           <textarea
             v-model="labelNames"
             class="field-textarea"
             rows="3"
-            placeholder="ปล่อยว่างได้ ระบบจะอ้างอิงจากโมเดลถ้าพบข้อมูล&#10;หรือกรอกเอง เช่น: bottle, cap, label"
+            placeholder="Leave empty to use the names stored in the model&#10;or type them, for example: bottle, cap, label"
           />
         </div>
 
@@ -150,7 +150,7 @@
         <div v-if="mode === 'images'" class="step-block">
           <div class="step-head">
             <div class="step-num">4</div>
-            <span>เลือกรูปที่จะทดสอบ</span>
+            <span>Choose images</span>
           </div>
           <label
             class="drop-zone"
@@ -161,8 +161,8 @@
             <input ref="imagesInput" type="file" accept="image/*" multiple class="hidden-input" @change="onImagesChange" />
             <div v-if="!imageFiles.length" class="dz-inner">
               <Icon name="image" size="lg" />
-              <span class="dz-title">คลิก หรือ ลากรูปมาวาง</span>
-              <span class="dz-hint">jpg / png / bmp &bull; หลายรูปได้</span>
+              <span class="dz-title">Click, or drop images here</span>
+              <span class="dz-hint">jpg / png / bmp &bull; several at once</span>
             </div>
             <div v-else class="image-thumbs">
               <div v-for="(f, i) in imageFiles.slice(0, 8)" :key="i" class="thumb-wrap">
@@ -170,14 +170,14 @@
                 <span class="thumb-name">{{ f.name }}</span>
               </div>
               <div v-if="imageFiles.length > 8" class="thumb-more">
-                +{{ imageFiles.length - 8 }} รูป
+                +{{ imageFiles.length - 8 }} more
               </div>
             </div>
           </label>
           <div v-if="imageFiles.length" class="img-count-row">
             <Icon name="image" size="sm" />
-            <span>เลือกแล้ว <strong>{{ imageFiles.length }}</strong> ไฟล์</span>
-            <button class="link-btn" @click="clearImages">ล้าง</button>
+            <span><strong>{{ imageFiles.length }}</strong> file(s) chosen</span>
+            <button class="link-btn" @click="clearImages">Clear</button>
           </div>
         </div>
 
@@ -185,7 +185,7 @@
         <div v-else-if="mode === 'video'" class="step-block">
           <div class="step-head">
             <div class="step-num">4</div>
-            <span>เลือกวิดีโอ</span>
+            <span>Choose a video</span>
           </div>
           <label
             class="drop-zone"
@@ -196,7 +196,7 @@
             <input ref="videoInput" type="file" accept="video/*" class="hidden-input" @change="onVideoChange" />
             <div v-if="!videoFile" class="dz-inner">
               <Icon name="video" size="lg" />
-              <span class="dz-title">คลิก หรือ ลากวิดีโอมาวาง</span>
+              <span class="dz-title">Click, or drop a video here</span>
               <span class="dz-hint">mp4 / mov / avi / mkv / webm</span>
             </div>
             <div v-else class="dz-chosen">
@@ -212,13 +212,14 @@
           </label>
 
           <label class="sample-row">
-            <span>ตรวจจับกี่เฟรมต่อวินาที</span>
+            <span>Frames sampled per second</span>
             <input v-model.number="sampleFps" type="range" min="1" max="15" step="1" class="styled-slider" />
             <strong>{{ sampleFps }}</strong>
           </label>
           <p class="field-note">
-            ยิ่งสูงยิ่งละเอียดแต่ใช้เวลานานขึ้น ระบบคืนพิกัดกรอบต่อเฟรม
-            แล้ววาดทับวิดีโอที่เล่นในเครื่องคุณ ไม่ต้องส่งวิดีโอกลับ
+            Higher is more detailed and slower. Only the box coordinates come back;
+            the clip you chose is played here and drawn over, so no video is
+            sent in return.
           </p>
         </div>
 
@@ -226,33 +227,33 @@
         <div v-else class="step-block">
           <div class="step-head">
             <div class="step-num">4</div>
-            <span>กล้อง</span>
+            <span>Camera</span>
           </div>
 
           <div v-if="!cameraSupported" class="error-box">
             <Icon name="alert-triangle" size="sm" />
             <span>
-              เบราว์เซอร์เปิดกล้องได้เฉพาะหน้าเว็บที่เป็น https หรือ localhost
-              เท่านั้น ตอนนี้เปิดผ่าน <code>{{ pageOrigin }}</code>
-              ให้เปิดที่เครื่องที่รันเซิร์ฟเวอร์ด้วย
-              <code>http://localhost:{{ pagePort }}</code> แทน
+              Browsers only allow the camera on https or localhost. This page is open
+              at <code>{{ pageOrigin }}</code>. Open it on the machine running
+              the server, at
+              <code>http://localhost:{{ pagePort }}</code>, instead.
             </span>
           </div>
 
           <template v-else>
             <select v-if="cameras.length > 1" v-model="cameraId" class="field-select">
               <option v-for="cam in cameras" :key="cam.deviceId" :value="cam.deviceId">
-                {{ cam.label || 'กล้อง' }}
+                {{ cam.label || 'Camera' }}
               </option>
             </select>
             <label class="sample-row">
-              <span>ตรวจจับกี่ครั้งต่อวินาที</span>
+              <span>Detections per second</span>
               <input v-model.number="liveFps" type="range" min="1" max="15" step="1" class="styled-slider" />
               <strong>{{ liveFps }}</strong>
             </label>
             <p v-if="liveStats.fps" class="field-note">
-              กำลังทำได้จริง {{ liveStats.fps.toFixed(1) }} fps
-              ({{ liveStats.ms }} ms ต่อเฟรม)
+              Actually managing {{ liveStats.fps.toFixed(1) }} fps
+              ({{ liveStats.ms }} ms per frame)
             </p>
           </template>
         </div>
@@ -267,12 +268,12 @@
         >
           <span v-if="!loading" class="run-inner">
             <Icon name="zap" size="sm" />
-            {{ mode === 'video' ? 'วิเคราะห์วิดีโอ' : 'ทดสอบโมเดล' }}
+            {{ mode === 'video' ? 'Analyse video' : 'Run the model' }}
           </span>
           <span v-else class="run-inner">
             <span class="spinner"></span>
             {{ videoJob && videoJob.status === 'running'
-              ? `${videoJob.frames_done} เฟรม…` : 'กำลังประมวลผล…' }}
+              ? `${videoJob.frames_done} frames…` : 'Working…' }}
           </span>
         </button>
 
@@ -285,7 +286,7 @@
         >
           <span class="run-inner">
             <Icon :name="cameraOn ? 'x' : 'video'" size="sm" />
-            {{ cameraOn ? 'หยุดกล้อง' : 'เปิดกล้อง' }}
+            {{ cameraOn ? 'Stop the camera' : 'Start the camera' }}
           </span>
         </button>
 
@@ -293,7 +294,7 @@
           v-if="mode === 'video' && videoJob && videoJob.status === 'running'"
           class="link-btn stop-link"
           @click="stopVideoJob"
-        >หยุดการวิเคราะห์</button>
+        >Stop the analysis</button>
 
         <div v-if="error" class="error-box">
           <Icon name="x" size="sm" />
@@ -315,12 +316,12 @@
             />
             <div v-if="!cameraOn" class="live-idle">
               <Icon name="video" size="xl" />
-              <p>กด <strong>เปิดกล้อง</strong> เพื่อเริ่มตรวจจับสด</p>
+              <p>Press <strong>Start the camera</strong> to detect live</p>
             </div>
           </div>
           <div v-if="cameraOn" class="live-bar">
             <span v-if="liveReading" class="reading-chip">{{ liveReading }}</span>
-            <span>พบ <strong>{{ liveDetections.length }}</strong> วัตถุ</span>
+            <span><strong>{{ liveDetections.length }}</strong> object(s)</span>
             <span v-for="(count, label) in liveTally" :key="label" class="chip chip-purple">
               {{ label }} × {{ count }}
             </span>
@@ -348,12 +349,12 @@
           </div>
           <div v-if="videoJob" class="live-bar">
             <span v-if="videoJob.status === 'running'">
-              วิเคราะห์แล้ว {{ videoJob.frames_done }} เฟรม…
+              Analysed {{ videoJob.frames_done }} frames…
             </span>
             <template v-else>
-              <span>{{ videoJob.frames_total }} เฟรม</span>
-              <span>พบรวม <strong>{{ videoJob.detection_count }}</strong> วัตถุ</span>
-              <span>ใช้เวลา {{ videoJob.elapsed_s }}s</span>
+              <span>{{ videoJob.frames_total }} frames</span>
+              <span><strong>{{ videoJob.detection_count }}</strong> objects in total</span>
+              <span>took {{ videoJob.elapsed_s }}s</span>
               <a
                 v-if="videoJob.frames_total"
                 class="csv-link"
@@ -361,11 +362,11 @@
                 download
               >
                 <Icon name="download" size="sm" />
-                <span>ดาวน์โหลด CSV</span>
+                <span>Download CSV</span>
               </a>
               <span v-if="playbackReading" class="reading-chip">{{ playbackReading }}</span>
               <span v-if="playbackDetections.length" class="chip chip-green">
-                ตอนนี้ {{ playbackDetections.length }} วัตถุ
+                {{ playbackDetections.length }} here
               </span>
             </template>
           </div>
@@ -377,8 +378,8 @@
           <div class="empty-icon">
             <Icon name="search" size="xl" />
           </div>
-          <h3>ยังไม่มีผลลัพธ์</h3>
-          <p>เลือกโมเดล, เลือกรูป แล้วกด <strong>ทดสอบโมเดล</strong></p>
+          <h3>Nothing to show yet</h3>
+          <p>Choose a model and some images, then press <strong>Run the model</strong></p>
           <div class="empty-steps">
             <div v-for="(s, i) in EMPTY_STEPS" :key="i" class="empty-step">
               <span class="e-num">{{ i + 1 }}</span>
@@ -399,9 +400,9 @@
         <!-- Results grid -->
         <div v-else>
           <div class="results-summary-bar">
-            <span class="rs-label">ผลลัพธ์ {{ results.length }} รูป</span>
+            <span class="rs-label">{{ results.length }} image(s)</span>
             <span class="rs-det">
-              พบวัตถุรวม <strong>{{ totalDetections }}</strong> รายการ
+              <strong>{{ totalDetections }}</strong> object(s) found
               (threshold ≥ {{ scoreThreshold.toFixed(2) }})
             </span>
           </div>
@@ -423,7 +424,7 @@
               </div>
 
               <div v-if="item.reading" class="rc-reading">
-                <span class="rc-reading-label">อ่านได้</span>
+                <span class="rc-reading-label">Reads</span>
                 <span class="rc-reading-value">{{ item.reading }}</span>
               </div>
 
@@ -439,7 +440,7 @@
                 </div>
               </div>
               <div v-else class="rc-none">
-                ไม่พบวัตถุที่ผ่าน threshold
+                Nothing above the threshold
               </div>
 
             </article>
@@ -467,18 +468,18 @@ const MODEL_FORMATS = [
 ]
 
 const EMPTY_STEPS = [
-  'Import โมเดล (.pth / .pt / .onnx / .torchscript)',
-  'ระบุ Label Names (ถ้าทราบ) แยกด้วย comma',
-  'ปรับ Score Threshold ตามต้องการ',
-  'เลือกรูปที่จะทดสอบ (หลายรูปได้)',
-  'กด ทดสอบโมเดล',
+  'Choose a model (.pth / .pt / .onnx / .torchscript)',
+  'Type the class names if you know them, separated by commas',
+  'Set the score threshold',
+  'Choose images to test with',
+  'Press Run the model',
 ]
 
 // ── State ────────────────────────────────────────────────────────────
 const MODES = [
-  { id: 'images', label: 'รูปภาพ', icon: 'image' },
-  { id: 'video',  label: 'วิดีโอ', icon: 'video' },
-  { id: 'webcam', label: 'กล้อง',  icon: 'camera' },
+  { id: 'images', label: 'Images', icon: 'image' },
+  { id: 'video',  label: 'Video', icon: 'video' },
+  { id: 'webcam', label: 'Camera', icon: 'camera' },
 ]
 const mode = ref('images')
 
@@ -700,12 +701,12 @@ const runVideo = async () => {
         clearInterval(videoPoll)
         videoPoll = null
         loading.value = false
-        error.value = errorMessage(err, 'ติดตามงานวิเคราะห์วิดีโอไม่ได้')
+        error.value = errorMessage(err, 'Lost track of the video analysis')
       }
     }, 1000)
   } catch (err) {
     loading.value = false
-    error.value = errorMessage(err, 'วิเคราะห์วิดีโอไม่สำเร็จ')
+    error.value = errorMessage(err, 'The video could not be analysed')
   }
 }
 
@@ -745,8 +746,8 @@ const startCamera = async () => {
     scheduleFrame()
   } catch (err) {
     error.value = err?.name === 'NotAllowedError'
-      ? 'เบราว์เซอร์ไม่อนุญาตให้ใช้กล้อง กดอนุญาตที่แถบที่อยู่แล้วลองใหม่'
-      : `เปิดกล้องไม่ได้: ${err?.message || err}`
+      ? 'The browser refused the camera. Allow it from the address bar and try again.'
+      : `The camera could not be opened: ${err?.message || err}`
   }
 }
 
@@ -803,7 +804,7 @@ const grabFrame = async () => {
       liveStats.value = { fps: 1000 / ms, ms: Math.round(ms) }
     }
   } catch (err) {
-    error.value = errorMessage(err, 'ตรวจจับเฟรมไม่สำเร็จ')
+    error.value = errorMessage(err, 'That frame could not be processed')
     stopCamera()
     return
   } finally {
@@ -877,7 +878,7 @@ const runTest = async () => {
     resolvedLabelSource.value = res.resolved_label_source || ''
     results.value = res.results || []
   } catch (err) {
-    error.value = errorMessage(err, 'เกิดข้อผิดพลาดในการทดสอบโมเดล')
+    error.value = errorMessage(err, 'The model could not be run')
   } finally {
     loading.value = false
   }

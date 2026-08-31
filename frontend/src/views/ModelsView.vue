@@ -246,7 +246,7 @@ const filteredModels = computed(() => {
   background:var(--grad-surface) 100%);
 }
 
-/* โ”€โ”€ Toolbar โ”€โ”€ */
+/* ── Toolbar ── */
 .page-topbar {
   display:flex;
   align-items:center;
@@ -300,7 +300,7 @@ const filteredModels = computed(() => {
 
 .filter-select:focus { outline:none; border-color:var(--primary-400); }
 
-/* โ”€โ”€ Container โ”€โ”€ */
+/* ── Container ── */
 .models-container {
   max-width:1400px;
   margin:0 auto;
@@ -319,7 +319,7 @@ const filteredModels = computed(() => {
 .empty-state h3 { font-size:1.4rem; font-weight:600; margin:1rem 0 0.5rem; color:var(--text-primary); }
 .empty-state p { margin-bottom:2rem; }
 
-/* โ”€โ”€ Grid โ”€โ”€ */
+/* ── Grid ── */
 .models-grid {
   display:grid;
   grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));

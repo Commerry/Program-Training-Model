@@ -160,7 +160,7 @@
           <div class="form-group" style="margin-top:1rem">
             <label class="form-label">Import into project *</label>
             <select v-model="uploadForm.projectName" class="form-input">
-              <option value="">โ€” Select project โ€”</option>
+              <option value="">— Select project —</option>
               <option v-for="p in projects" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
           </div>
@@ -310,7 +310,7 @@ const formatFileSize = formatBytes
   background:var(--grad-surface) 100%);
 }
 
-/* โ”€โ”€ Toolbar โ”€โ”€ */
+/* ── Toolbar ── */
 .page-topbar {
   display:flex;
   align-items:center;
@@ -396,7 +396,7 @@ const formatFileSize = formatBytes
   width:160px;
 }
 
-/* โ”€โ”€ Content โ”€โ”€ */
+/* ── Content ── */
 .datasets-container {
   max-width:1400px;
   margin:0 auto;
@@ -428,7 +428,7 @@ const formatFileSize = formatBytes
   flex-wrap:wrap;
 }
 
-/* โ”€โ”€ Grid โ”€โ”€ */
+/* ── Grid ── */
 .datasets-grid {
   display:grid;
   grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));
@@ -549,7 +549,7 @@ const formatFileSize = formatBytes
 .btn-icon:hover { background:var(--primary-100); color:var(--primary-600); }
 .btn-icon.danger:hover { background:var(--danger-100); color:var(--danger-600); }
 
-/* โ”€โ”€ Modal โ”€โ”€ */
+/* ── Modal ── */
 .modal-overlay {
   position:fixed;
   inset:0;
@@ -604,7 +604,7 @@ const formatFileSize = formatBytes
   border-top:1px solid var(--border-color);
 }
 
-/* โ”€โ”€ Format info โ”€โ”€ */
+/* ── Format info ── */
 .format-info-card {
   display:flex;
   gap:0.75rem;
@@ -636,7 +636,7 @@ code {
   font-size:0.8125rem;
 }
 
-/* โ”€โ”€ Upload area โ”€โ”€ */
+/* ── Upload area ── */
 .upload-area {
   border:2px dashed var(--border-color);
   border-radius:12px;
@@ -671,7 +671,7 @@ code {
 
 .file-size { color:var(--text-secondary); font-size:0.8125rem; }
 
-/* โ”€โ”€ Form โ”€โ”€ */
+/* ── Form ── */
 .form-group { margin-bottom:1rem; }
 .form-label { display:block; font-size:0.875rem; font-weight:500; margin-bottom:0.375rem; color:var(--text-primary); }
 .form-input {

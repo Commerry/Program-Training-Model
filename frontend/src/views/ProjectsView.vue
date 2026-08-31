@@ -247,7 +247,7 @@ const deleteProjectHandler = async (projectName) => {
   background:var(--grad-surface) 100%);
 }
 
-/* โ”€โ”€ Toolbar โ”€โ”€ */
+/* ── Toolbar ── */
 .page-topbar {
   display:flex;
   align-items:center;
