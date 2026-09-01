@@ -694,6 +694,20 @@ and wrongly, which is the whole failure this path exists to stop.
 Anything set by hand still wins. Recognition fills in what was not stated; it
 never overrules what was.
 
+### The class names live in a separate file
+
+An ONNX carries no class names at all. A model this application trained is
+matched against the projects tree and gets its names back that way; a model
+from elsewhere keeps them in a `labels.txt` beside it, which does not come
+along when the model file alone is uploaded. That is why a working Custom
+Vision model still reported `class_11` and `class_19` rather than the names it
+was trained with.
+
+**Load labels.txt** next to the Label Names box takes the file. Twenty-one
+class names retyped in the right order is not a reasonable ask. Names typed
+into the box still win over the file; the file is a convenience, not an
+override.
+
 That answer goes into **Model built elsewhere?** on the Test Model page — for
 example `stretch bgr raw xyxy` — and from then on the model is fed the way it
 expects, and ultralytics is skipped, since it would only guess.

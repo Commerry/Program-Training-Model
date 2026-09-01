@@ -127,6 +127,19 @@
             rows="3"
             placeholder="Leave empty to use the names stored in the model&#10;or type them, for example: bottle, cap, label"
           />
+          <div class="labels-file">
+            <label class="labels-file-btn">
+              <input type="file" accept=".txt,.csv,text/plain" @change="pickLabelsFile" />
+              Load labels.txt
+            </label>
+            <span v-if="labelsFile" class="labels-file-name">
+              {{ labelsFile.name }}
+              <button type="button" class="labels-file-clear" @click="clearLabelsFile">Clear</button>
+            </span>
+            <span v-else class="labels-file-hint">
+              An ONNX stores no class names; an export keeps them beside it
+            </span>
+          </div>
         </div>
 
         <!-- Optional: how a model from elsewhere wants to be fed -->
@@ -645,6 +658,16 @@ const labelNames    = ref('')
 // than an error, so this stays empty until backend/tools/probe_onnx.py has
 // been run against the model.
 const onnxConventions = ref('')
+// The class names an ONNX does not carry. Custom Vision and most other
+// exports write them to a labels.txt in the same folder, which does not come
+// along when the model file alone is uploaded -- which is why such a model
+// reports class_11 rather than the name it was trained with.
+const labelsFile = ref(null)
+
+const pickLabelsFile = (event) => {
+  labelsFile.value = event.target.files?.[0] || null
+}
+const clearLabelsFile = () => { labelsFile.value = null }
 const scoreThreshold = ref(0.5)
 const loading       = ref(false)
 const error         = ref('')
@@ -1024,6 +1047,7 @@ const runTest = async () => {
       {
         scoreThreshold: scoreThreshold.value,
         labelNames: labelNames.value,
+        labelsFile: labelsFile.value,
         onnxConventions: onnxConventions.value.trim()
       }
     )
@@ -1429,6 +1453,43 @@ const runTest = async () => {
   resize:vertical;
   font-family:inherit;
   color:var(--text-primary, var(--text));
+}
+
+.labels-file {
+  display:flex;
+  align-items:center;
+  gap:0.5rem;
+  flex-wrap:wrap;
+  margin-top:0.5rem;
+}
+.labels-file-btn {
+  cursor:pointer;
+  font-size:0.76rem;
+  font-weight:600;
+  padding:0.35rem 0.65rem;
+  border-radius:8px;
+  border:1px solid var(--border-color, var(--border));
+  background: var(--bg-subtle);
+  color:var(--text-primary, var(--text));
+}
+.labels-file-btn input { display:none; }
+.labels-file-name {
+  font-size:0.76rem;
+  color:var(--primary-700, var(--accent));
+}
+.labels-file-clear {
+  margin-left:0.35rem;
+  background:none;
+  border:none;
+  padding:0;
+  cursor:pointer;
+  font-size:0.72rem;
+  color:var(--danger, #d9534f);
+  text-decoration:underline;
+}
+.labels-file-hint {
+  font-size:0.72rem;
+  color:var(--text-tertiary, var(--text-3));
 }
 
 .conventions {

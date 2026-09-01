@@ -125,7 +125,23 @@ def _model_for_request():
 
 
 def _label_names():
+    """
+    The class names, typed in or uploaded.
+
+    An ONNX carries no class names at all -- an export that has them keeps
+    them in a labels.txt beside the model, which does not come along when only
+    the model file is uploaded. That is why a Custom Vision model reported
+    class_11 and class_19 rather than NonBad and TearTriangle. Uploading the
+    file beats retyping twenty-one names in the right order.
+    """
     text = (request.form.get('label_names') or '').strip()
+    if not text:
+        upload = request.files.get('labels_file')
+        if upload and upload.filename:
+            try:
+                text = upload.read().decode('utf-8-sig', errors='replace')
+            except OSError:
+                text = ''
     return [part.strip() for part in text.replace('\n', ',').split(',') if part.strip()]
 
 

@@ -265,6 +265,45 @@ run('boxes and scores', boxes_and_scores, BOX_OUT, CLASS, 'boxes and scores')
 # network's view, which is [112, 64, 176, 128] in the photo.
 run('strides', strides, [112, 64, 176, 128], 2, 'per-stride')
 
+print('\n== the class names an ONNX does not carry ==')
+# A Custom Vision export reported class_11 and class_19 because the graph
+# holds no names at all -- they live in a labels.txt beside the model, which
+# does not come along when the model file alone is uploaded. Retyping
+# twenty-one names in the right order is a poor answer, so the file is
+# uploaded instead.
+tensors, names = split_no_count()
+path = export(tensors, names, TMP / 'named.onnx')
+labels = b'Bad\nCuffRoll\nCuffTear\n'
+
+r = c.post('/api/models/test', data={
+    'images': [(io.BytesIO(JPEG), 'a.jpg')],
+    'model': (io.BytesIO(path.read_bytes()), 'model.onnx'),
+    'labels_file': (io.BytesIO(labels), 'labels.txt'),
+    'score_threshold': '0.5',
+}, content_type='multipart/form-data')
+body = r.get_json() or {}
+found = (body.get('results') or [{}])[0].get('detections') or []
+check('the request succeeds', r.status_code == 200, r.status_code)
+check('the detection is named from the file',
+      bool(found) and found[0]['label_name'] == 'CuffRoll',
+      found[0] if found else None)
+check('and the names are reported back',
+      (body.get('resolved_label_names') or [])[:3] == ['Bad', 'CuffRoll', 'CuffTear'],
+      body.get('resolved_label_names'))
+
+# Typed names still win: the box is the deliberate choice, the file a fallback.
+r = c.post('/api/models/test', data={
+    'images': [(io.BytesIO(JPEG), 'a.jpg')],
+    'model': (io.BytesIO(path.read_bytes()), 'model.onnx'),
+    'labels_file': (io.BytesIO(labels), 'labels.txt'),
+    'label_names': 'one, two, three',
+    'score_threshold': '0.5',
+}, content_type='multipart/form-data')
+found = ((r.get_json() or {}).get('results') or [{}])[0].get('detections') or []
+check('what was typed wins over the file',
+      bool(found) and found[0]['label_name'] == 'two',
+      found[0] if found else None)
+
 print('\n' + ('ONNX LAYOUTS OK' if not fails else f'{len(fails)} FAILED: {fails}'))
 if fails:
     print(f'(kept for inspection: {TMP})')

@@ -118,8 +118,10 @@ export const trainingService = {
     form.append('score_threshold', String(options.scoreThreshold ?? 0.5))
     form.append('label_names', options.labelNames ?? '')
     form.append('img_size', String(options.imgSize ?? 640))
-    // How an ONNX built elsewhere wants to be fed. Nothing in the file
-    // records it, so it is left empty until somebody works it out.
+    // An ONNX carries no class names. An export that has them keeps them in a
+    // labels.txt beside the model, which does not come along with the model
+    // file on its own.
+    if (options.labelsFile) form.append('labels_file', options.labelsFile)
     if (options.onnxConventions) {
       form.append('onnx_conventions', options.onnxConventions)
     }
