@@ -147,6 +147,33 @@ def _looks_like_corners(columns):
                 and np.all(finite[:, 1] <= finite[:, 3] + 1e-3))
 
 
+RESIZES = ('letterbox', 'stretch')
+CHANNELS = ('rgb', 'bgr')
+SCALES = ('unit', 'raw')
+ORDERS = ('xyxy', 'yxyx')
+
+
+def parse_conventions(text):
+    """
+    Read "stretch bgr raw xyxy" into keyword arguments, in any order.
+
+    What probe_onnx.py prints is what this accepts, so the answer it works out
+    can be pasted straight in. Anything unrecognised is ignored rather than
+    refused: a typo should cost a default, not a run.
+    """
+    chosen = {}
+    for word in str(text or '').replace(',', ' ').lower().split():
+        if word in RESIZES:
+            chosen['resize'] = word
+        elif word in CHANNELS:
+            chosen['channels'] = word
+        elif word in SCALES:
+            chosen['scale'] = word
+        elif word in ORDERS:
+            chosen['box_order'] = word
+    return chosen
+
+
 def _signature(session):
     """The graph in one line, for an error somebody has to act on."""
     def describe_one(node):
@@ -195,12 +222,38 @@ def describe(path):
 class OnnxDetector:
     """A detector ONNX, driven from the graph rather than the metadata."""
 
-    def __init__(self, path, img_size=None, display_name=None):
+    def __init__(self, path, img_size=None, display_name=None,
+                 resize='letterbox', channels='rgb', scale='unit',
+                 box_order='xyxy'):
+        """
+        `resize`, `channels`, `scale` and `box_order` are the conventions a
+        model was built with, and nothing in an ONNX records them.
+
+        A YOLO is letterboxed, fed RGB in 0..1, and answers in x1 y1 x2 y2, so
+        those are the defaults. A model converted from other tooling may be
+        stretched to fit rather than padded, may want BGR, may want 0..255,
+        and may answer in y1 x1 y2 x2 -- and getting any of them wrong does
+        not fail. It returns confident nonsense, usually one box over the
+        whole frame, which is how this came up: a real model answered
+
+            class_10  98%  6, 0, 1595, 1199
+
+        on a 1600x1200 photo, which is the entire picture.
+
+        There is no way to read these off the file, so backend/tools/
+        probe_onnx.py runs the combinations over real images and reports which
+        one produces detections that vary from picture to picture instead of
+        covering everything.
+        """
         # Named after what the person chose, not the temporary file an upload
         # is saved under: an error about a filename they have never seen tells
         # them nothing.
         from pathlib import Path as _Path
         self.name = display_name or _Path(path).name
+        self.resize = resize
+        self.channels = channels
+        self.scale = scale
+        self.box_order = box_order
 
         try:
             import onnxruntime as ort
@@ -539,9 +592,23 @@ class OnnxDetector:
         """
         import cv2
 
-        padded, scale, pad_x, pad_y = _letterbox(image_bgr, self.size)
-        rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
-        blob = rgb.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+        height, width = image_bgr.shape[:2]
+        if self.resize == 'stretch':
+            # No padding: the whole frame is squashed into the square, so the
+            # two axes come back at different scales.
+            fitted = cv2.resize(image_bgr, (self.size, self.size),
+                                interpolation=cv2.INTER_LINEAR)
+            scale_x, scale_y = self.size / width, self.size / height
+            pad_x = pad_y = 0
+        else:
+            fitted, scale, pad_x, pad_y = _letterbox(image_bgr, self.size)
+            scale_x = scale_y = scale
+
+        prepared = (fitted if self.channels == 'bgr'
+                    else cv2.cvtColor(fitted, cv2.COLOR_BGR2RGB))
+        blob = prepared.transpose(2, 0, 1)[None].astype(np.float32)
+        if self.scale == 'unit':
+            blob /= 255.0
 
         raw = self.session.run(None, {self.input_name: blob})
         arrays = [np.asarray(a) for a in raw]
@@ -551,17 +618,20 @@ class OnnxDetector:
         scores = np.asarray(scores, np.float32).reshape(-1)
         class_ids = np.asarray(class_ids, np.int32).reshape(-1)
 
+        if self.box_order == 'yxyx':
+            corners = corners[:, [1, 0, 3, 2]]
+
         keep = scores >= threshold
         if not np.any(keep):
             return []
         corners, scores, class_ids = corners[keep], scores[keep], class_ids[keep]
 
-        # Back out of the letterbox into the original frame.
+        # Back out of the fitting into the original frame.
         corners[:, [0, 2]] -= pad_x
         corners[:, [1, 3]] -= pad_y
-        corners /= max(scale, 1e-9)
+        corners[:, [0, 2]] /= max(scale_x, 1e-9)
+        corners[:, [1, 3]] /= max(scale_y, 1e-9)
 
-        height, width = image_bgr.shape[:2]
         corners[:, [0, 2]] = corners[:, [0, 2]].clip(0, width)
         corners[:, [1, 3]] = corners[:, [1, 3]].clip(0, height)
 

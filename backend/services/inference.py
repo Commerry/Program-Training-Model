@@ -144,7 +144,8 @@ def _encode(image):
 
 
 def run_inference(model_file=None, image_files=None, score_threshold=0.5,
-                  label_names=None, img_size=640, model_path=None):
+                  label_names=None, img_size=640, model_path=None,
+                  conventions=None):
     """
     Detect objects in each image and return annotated previews.
 
@@ -221,6 +222,15 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
                 label_names = used_labels
                 label_source = 'generated from the checkpoint'
             model_format = 'pth'
+        elif suffix == '.onnx' and conventions:
+            # Conventions chosen by hand mean somebody has already worked out
+            # how this model wants to be fed, which ultralytics has no way of
+            # knowing and would only guess at. Go straight to the graph.
+            results, device_label, used_labels, failures = _run_onnx_directly(
+                temp_path, images, score_threshold, label_names, img_size,
+                f'set by hand: {conventions}', source_name, conventions
+            )
+            model_format = 'onnx'
         else:
             results, device_label, used_labels, failures = _run_ultralytics(
                 temp_path, images, score_threshold, label_names, img_size,
@@ -297,7 +307,7 @@ def _loading_failed(path, exc, display_name=None):
 
 
 def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
-                       reason, display_name=None):
+                       reason, display_name=None, conventions=None):
     """
     Drive a YOLO-shaped ONNX with onnxruntime, when ultralytics will not.
 
@@ -306,8 +316,9 @@ def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
     """
     from services import onnxrunner
 
+    chosen = onnxrunner.parse_conventions(conventions)
     detector = onnxrunner.OnnxDetector(model_path, img_size=img_size,
-                                       display_name=display_name)
+                                       display_name=display_name, **chosen)
     active = list(label_names or [])
 
     def label_for(class_id):

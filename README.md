@@ -625,6 +625,56 @@ one extra pass only when the answer would have been empty anyway.
 
 The page reports which path and which layout were used, and why it switched.
 
+### A model can be read correctly and still be fed wrongly
+
+Decoding the output is half of it. An ONNX also says nothing about what the
+numbers going *in* mean, and there are four separate conventions to get right:
+
+| | |
+| --- | --- |
+| resize | padded to a square (letterbox), or squashed into one (stretch) |
+| channels | RGB, or BGR |
+| scale | pixels as 0&ndash;1, or as 0&ndash;255 |
+| box order | `x1 y1 x2 y2`, or `y1 x1 y2 x2` |
+
+Get one wrong and nothing raises. A real glove-defect model answered
+
+```
+class_10   98%   6, 0, 1595, 1199
+```
+
+on a 1600x1200 photo, which is the entire picture — a confident box around
+everything, from a model that in production draws a tight box on the torn
+part of a glove. That is what a detector does when it is fed something it was
+not trained on: it does not fail, it agrees with everything.
+
+Nothing in the file records these, so they are found by trying:
+
+```powershell
+python backend	ools\probe_onnx.py model.onnx folder-of-images
+```
+
+It runs all sixteen combinations over real photos and scores each on what a
+working detector does and a broken one does not — boxes that cover part of the
+frame rather than all of it, boxes that move between pictures, more than one
+class across the set.
+
+Two of the four are settled by the numbers alone: fed the wrong channels or
+the wrong pixel range a model finds nothing at all. The other two are not.
+Padding and squashing are both undone faithfully, and a box read in the wrong
+corner order is still a plausible-looking box, so both produce tables that
+read fine. Those are settled by looking, which is why the probe also writes
+the pictures with the boxes drawn on. The one whose boxes sit on the object is
+the answer.
+
+That answer goes into **Model built elsewhere?** on the Test Model page — for
+example `stretch bgr raw xyxy` — and from then on the model is fed the way it
+expects, and ultralytics is skipped, since it would only guess.
+
+The verification for this runs against a model built to have known
+conventions: it finds a blue rectangle, and can only do so fed BGR at 0&ndash;255,
+so the probe's answer can be checked rather than assumed.
+
 ### When a model still will not run
 
 ```bash

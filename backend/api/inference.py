@@ -36,6 +36,10 @@ def test_model():
         score_threshold=request.form.get('score_threshold', 0.5),
         label_names=label_names,
         img_size=img_size,
+        # How an ONNX built elsewhere wants to be fed, once somebody has
+        # worked it out with backend/tools/probe_onnx.py. Nothing in the file
+        # records it, and guessing wrong returns confident nonsense.
+        conventions=(request.form.get('onnx_conventions') or '').strip() or None,
     ))
 
 

@@ -118,6 +118,11 @@ export const trainingService = {
     form.append('score_threshold', String(options.scoreThreshold ?? 0.5))
     form.append('label_names', options.labelNames ?? '')
     form.append('img_size', String(options.imgSize ?? 640))
+    // How an ONNX built elsewhere wants to be fed. Nothing in the file
+    // records it, so it is left empty until somebody works it out.
+    if (options.onnxConventions) {
+      form.append('onnx_conventions', options.onnxConventions)
+    }
     return http
       .post('/models/test', form, { headers: { 'Content-Type': 'multipart/form-data' } })
       .then((r) => r.data)

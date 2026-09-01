@@ -129,6 +129,27 @@
           />
         </div>
 
+        <!-- Optional: how a model from elsewhere wants to be fed -->
+        <details class="conventions">
+          <summary>Model built elsewhere? <span class="optional">(advanced)</span></summary>
+          <p class="conventions-note">
+            An ONNX does not record whether it wants padded or squashed frames,
+            RGB or BGR, pixels as 0&ndash;1 or 0&ndash;255, or which order its
+            box corners come in. Fed the wrong way it does not fail &mdash; it
+            returns one confident box over the whole picture.
+          </p>
+          <p class="conventions-note">
+            Run <code>python backend/tools/probe_onnx.py model.onnx folder-of-images</code>
+            and paste what it reports, for example <code>stretch bgr raw xyxy</code>.
+          </p>
+          <input
+            v-model="onnxConventions"
+            class="field-input"
+            type="text"
+            placeholder="letterbox rgb unit xyxy"
+          />
+        </details>
+
         <!-- Step 3: threshold -->
         <div class="step-block">
           <div class="step-head">
@@ -619,6 +640,11 @@ const imageFiles    = ref([])
 const imagesInput   = ref(null)
 const previewUrls   = ref([])
 const labelNames    = ref('')
+// How an ONNX built by other tooling wants to be fed. Nothing in the file
+// records it, and feeding it the wrong way returns confident nonsense rather
+// than an error, so this stays empty until backend/tools/probe_onnx.py has
+// been run against the model.
+const onnxConventions = ref('')
 const scoreThreshold = ref(0.5)
 const loading       = ref(false)
 const error         = ref('')
@@ -995,7 +1021,11 @@ const runTest = async () => {
     const res = await trainingService.testModel(
       chosenModel.value,
       imageFiles.value,
-      { scoreThreshold: scoreThreshold.value, labelNames: labelNames.value }
+      {
+        scoreThreshold: scoreThreshold.value,
+        labelNames: labelNames.value,
+        onnxConventions: onnxConventions.value.trim()
+      }
     )
     inferenceSummary.value = {
       model_name: res.model_name,
@@ -1398,6 +1428,41 @@ const runTest = async () => {
   font-size:0.85rem;
   resize:vertical;
   font-family:inherit;
+  color:var(--text-primary, var(--text));
+}
+
+.conventions {
+  border:1px solid var(--border-color, var(--border));
+  border-radius:10px;
+  padding:0.55rem 0.7rem;
+  background: var(--bg-subtle);
+}
+.conventions > summary {
+  cursor:pointer;
+  font-size:0.82rem;
+  font-weight:600;
+  color:var(--text-primary, var(--text));
+}
+.conventions-note {
+  margin:0.5rem 0 0;
+  font-size:0.74rem;
+  line-height:1.5;
+  color:var(--text-tertiary, var(--text-3));
+}
+.conventions-note code {
+  font-size:0.72rem;
+  word-break:break-all;
+  color:var(--text-primary, var(--text));
+}
+.field-input {
+  width:100%;
+  margin-top:0.55rem;
+  background: var(--bg-subtle);
+  border:1px solid var(--border-color, var(--border));
+  border-radius:10px;
+  padding:0.5rem 0.7rem;
+  font-family:inherit;
+  font-size:0.85rem;
   color:var(--text-primary, var(--text));
 }
 
