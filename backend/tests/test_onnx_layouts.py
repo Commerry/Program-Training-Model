@@ -254,7 +254,12 @@ run('fused', fused, BOX_OUT, CLASS, 'fused')
 run('decoded', decoded, BOX_OUT, CLASS, 'decoded')
 run('batched', batched, BOX_OUT, CLASS, 'decoded')
 run('split', split, BOX_OUT, CLASS, 'split')
-run('split with no count', split_no_count, BOX_OUT, CLASS, 'split')
+# Those three output names are Azure Custom Vision's, so this one is
+# recognised as that export and fed the way it wants -- squashed into the
+# square rather than padded -- which puts the box back through different
+# arithmetic. 640x480 squashed into 640 stretches the vertical by 4/3, so the
+# same normalised box lands at y 135..210 instead of 100..200.
+run('split with no count', split_no_count, [100, 135, 200, 210], CLASS, 'split')
 run('boxes and scores', boxes_and_scores, BOX_OUT, CLASS, 'boxes and scores')
 # anchor (144,176) with 32px on every side -> [112,144,176,208] in the
 # network's view, which is [112, 64, 176, 128] in the photo.

@@ -174,6 +174,68 @@ def parse_conventions(text):
     return chosen
 
 
+# Azure Custom Vision exports a detector as these three outputs, and its own
+# sample code feeds it in a way no YOLO is fed: the frame resized to the square
+# without preserving aspect, channels swapped to BGR, and pixels left at
+# 0..255 rather than divided down. Fed the YOLO way it does not fail -- it
+# answers with one box over the whole picture, which is how a real one behaved
+# here. The names are how the export is recognised; a folder from that export
+# also carries cvexport.manifest, labels.txt and metadata_properties.json.
+CUSTOM_VISION_OUTPUTS = {'detected_boxes', 'detected_classes', 'detected_scores'}
+CUSTOM_VISION_CONVENTIONS = {'resize': 'stretch', 'channels': 'bgr',
+                             'scale': 'raw', 'box_order': 'xyxy'}
+
+
+def _is_custom_vision(session):
+    names = {node.name for node in session.get_outputs()}
+    return CUSTOM_VISION_OUTPUTS.issubset(names)
+
+
+def is_custom_vision_file(path):
+    """Recognise the export before anything tries to load it as a YOLO."""
+    try:
+        import onnxruntime as ort
+        session = ort.InferenceSession(str(path),
+                                       providers=['CPUExecutionProvider'])
+    except Exception:  # noqa: BLE001 - the caller reports load failures
+        return False
+    return _is_custom_vision(session) or bool(sidecars(path).get('is_custom_vision'))
+
+
+def sidecars(model_path):
+    """
+    What an export folder says about itself, when the folder is to hand.
+
+    Custom Vision writes labels.txt and metadata_properties.json beside the
+    model, and between them they hold both the class names and the
+    preprocessing -- the two things the ONNX itself does not record. Reading
+    them beats inferring them.
+    """
+    from pathlib import Path as _Path
+    folder = _Path(model_path).parent
+    found = {}
+
+    labels = folder / 'labels.txt'
+    if labels.is_file():
+        try:
+            names = [line.strip() for line in
+                     labels.read_text(encoding='utf-8-sig').splitlines()]
+            found['labels'] = [n for n in names if n]
+        except OSError:
+            pass
+
+    meta = folder / 'metadata_properties.json'
+    if meta.is_file():
+        try:
+            import json
+            found['metadata'] = json.loads(meta.read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            pass
+
+    found['is_custom_vision'] = (folder / 'cvexport.manifest').is_file()
+    return found
+
+
 def _signature(session):
     """The graph in one line, for an error somebody has to act on."""
     def describe_one(node):
@@ -223,8 +285,7 @@ class OnnxDetector:
     """A detector ONNX, driven from the graph rather than the metadata."""
 
     def __init__(self, path, img_size=None, display_name=None,
-                 resize='letterbox', channels='rgb', scale='unit',
-                 box_order='xyxy'):
+                 resize=None, channels=None, scale=None, box_order=None):
         """
         `resize`, `channels`, `scale` and `box_order` are the conventions a
         model was built with, and nothing in an ONNX records them.
@@ -250,10 +311,19 @@ class OnnxDetector:
         # them nothing.
         from pathlib import Path as _Path
         self.name = display_name or _Path(path).name
+        # Left as None until something says otherwise, so that a convention
+        # somebody chose can be told apart from one that was never mentioned.
+        # Passing channels='rgb' is a decision; not passing it is not, and
+        # recognising the export must only fill in the second kind.
         self.resize = resize
         self.channels = channels
         self.scale = scale
         self.box_order = box_order
+        self.chosen = {'resize': resize is not None,
+                       'channels': channels is not None,
+                       'scale': scale is not None,
+                       'box_order': box_order is not None}
+        self.source = None
 
         try:
             import onnxruntime as ort
@@ -289,10 +359,94 @@ class OnnxDetector:
             raise ProjectError(
                 f'"{self.name}" produces no output. Graph -- {self.signature}')
 
+        # A Custom Vision export is recognisable and is fed nothing like a
+        # YOLO, so it gets its own conventions rather than the YOLO defaults.
+        # Anything the caller stated stands: this fills gaps, it does not
+        # overrule.
+        if _is_custom_vision(self.session):
+            self.source = 'Azure Custom Vision'
+            for key, value in CUSTOM_VISION_CONVENTIONS.items():
+                if not self.chosen[key]:
+                    setattr(self, key, value)
+
+        # The folder an export came from says more than the file does. It is
+        # only there when the model is read in place -- an upload arrives
+        # alone -- so this is a bonus, not a requirement.
+        self.sidecars = sidecars(path)
+        self.labels = self.sidecars.get('labels')
+        if self.sidecars.get('is_custom_vision'):
+            self.source = 'Azure Custom Vision'
+        self._apply_declared_preprocessing()
+
+        # Whatever is still unstated falls back to what a YOLO wants, which is
+        # what this application exports and much of what arrives here.
+        for key, value in (('resize', 'letterbox'), ('channels', 'rgb'),
+                           ('scale', 'unit'), ('box_order', 'xyxy')):
+            if getattr(self, key) is None:
+                setattr(self, key, value)
+
         # Which decoder was used, once something has actually been run. Worth
         # reporting: a person testing a model from elsewhere wants to know how
         # it was read, not only that it was.
         self.layout = None
+
+    def _apply_declared_preprocessing(self):
+        """
+        Believe the export's own metadata file over any inference.
+
+        Custom Vision writes what it did in metadata_properties.json --
+        the target size, the resize method, and a mean and standard deviation
+        the pixels were normalised by. Those are facts about the model, so
+        they win over the defaults; anything the caller asked for still wins
+        over them.
+
+        A mean and deviation other than the identity is not something this
+        runner applies, so it is reported rather than quietly ignored: a model
+        fed unnormalised pixels answers confidently and wrongly, which is the
+        failure this whole path exists to stop.
+        """
+        self.notes = []
+        meta = (self.sidecars or {}).get('metadata') or {}
+        if not meta:
+            return
+
+        def number_list(key):
+            raw = meta.get(key)
+            if not raw:
+                return None
+            try:
+                import json
+                value = json.loads(raw) if isinstance(raw, str) else raw
+                return [float(v) for v in value]
+            except (ValueError, TypeError):
+                return None
+
+        width = meta.get('CustomVision.Preprocess.TargetWidth')
+        height = meta.get('CustomVision.Preprocess.TargetHeight')
+        try:
+            if width and height and int(width) == int(height) and int(width) > 0:
+                # Only when the graph left the size open; a fixed input wins.
+                if not isinstance(self.session.get_inputs()[0].shape[2], int):
+                    self.size = int(width)
+        except (TypeError, ValueError):
+            pass
+
+        method = str(meta.get('CustomVision.Preprocess.ResizeMethod') or '')
+        if method and not self.chosen['resize']:
+            # Every resize method Custom Vision names squashes the frame into
+            # the square; none of them pads it the way a YOLO does.
+            self.resize = 'stretch'
+
+        mean = number_list('CustomVision.Preprocess.NormalizeMean')
+        std = number_list('CustomVision.Preprocess.NormalizeStd')
+        if mean and any(abs(v) > 1e-6 for v in mean):
+            self.notes.append(
+                f'the export declares a normalisation mean of {mean}, which '
+                'this runner does not apply')
+        if std and any(abs(v - 1.0) > 1e-6 for v in std):
+            self.notes.append(
+                f'the export declares a normalisation deviation of {std}, '
+                'which this runner does not apply')
 
     def _unreadable(self, detail):
         return ProjectError(

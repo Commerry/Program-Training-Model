@@ -222,6 +222,19 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
                 label_names = used_labels
                 label_source = 'generated from the checkpoint'
             model_format = 'pth'
+        elif suffix == '.onnx' and not conventions and _is_custom_vision(temp_path):
+            # Recognised before anything tries to load it as a YOLO. Handing a
+            # Custom Vision export to ultralytics wastes a pass at best, and at
+            # worst it half-loads and answers with a box over the whole
+            # picture, which reads as a detection rather than as a failure.
+            results, device_label, used_labels, failures = _run_onnx_directly(
+                temp_path, images, score_threshold, label_names, img_size,
+                'recognised as a Custom Vision export', source_name
+            )
+            if not label_names and used_labels:
+                label_names = used_labels
+                label_source = 'labels.txt beside the model'
+            model_format = 'onnx'
         elif suffix == '.onnx' and conventions:
             # Conventions chosen by hand mean somebody has already worked out
             # how this model wants to be fed, which ultralytics has no way of
@@ -269,6 +282,14 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
                 temp_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def _is_custom_vision(path):
+    from services import onnxrunner
+    try:
+        return onnxrunner.is_custom_vision_file(path)
+    except Exception:  # noqa: BLE001 - recognition must never break a run
+        return False
 
 
 def _loading_failed(path, exc, display_name=None):
@@ -319,7 +340,7 @@ def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
     chosen = onnxrunner.parse_conventions(conventions)
     detector = onnxrunner.OnnxDetector(model_path, img_size=img_size,
                                        display_name=display_name, **chosen)
-    active = list(label_names or [])
+    active = list(label_names or detector.labels or [])
 
     def label_for(class_id):
         if 0 <= class_id < len(active):
@@ -364,9 +385,16 @@ def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
     # worth saying: somebody testing a model from elsewhere wants to know how
     # it was read, not only that it was.
     layout = f', {detector.layout} output' if detector.layout else ''
+    # Naming the export it was recognised as matters more than naming the
+    # runtime: it says why the frames are being prepared the way they are.
+    source = f', {detector.source}' if detector.source else ''
     why = (reason if isinstance(reason, str)
            else f'ultralytics could not read this file: {type(reason).__name__}')
-    device = f'onnxruntime{layout} ({why})'
+    device = (f'onnxruntime{source}{layout} '
+              f'[{detector.resize} {detector.channels} {detector.scale} '
+              f'{detector.box_order}] ({why})')
+    for note in getattr(detector, 'notes', []):
+        device += f' -- {note}'
     return results, device, active, failures
 
 

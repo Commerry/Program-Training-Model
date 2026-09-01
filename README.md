@@ -667,6 +667,33 @@ read fine. Those are settled by looking, which is why the probe also writes
 the pictures with the boxes drawn on. The one whose boxes sit on the object is
 the answer.
 
+### Azure Custom Vision exports are recognised
+
+That whole search is unnecessary when the export says what it is. A Custom
+Vision folder looks like this:
+
+```
+cvexport.manifest   labels.txt   metadata_properties.json   model.onnx
+```
+
+and the ONNX inside it has three outputs named `detected_boxes`,
+`detected_classes` and `detected_scores`. Those names are enough to recognise
+it, so it is fed the way that export is fed — squashed into the square, BGR,
+pixels at 0–255 — without anybody being asked. It also skips ultralytics
+entirely, since handing it a Custom Vision model wastes a pass at best and at
+worst half-loads it and answers with a box over the whole picture, which reads
+as a detection rather than as a failure.
+
+Run the model from inside its own folder and two more things are used:
+`labels.txt` supplies the class names, and `metadata_properties.json` supplies
+the target size and the resize method it was exported with. A normalisation
+mean or deviation this runner does not apply is reported alongside the results
+rather than passed over — a model fed unnormalised pixels answers confidently
+and wrongly, which is the whole failure this path exists to stop.
+
+Anything set by hand still wins. Recognition fills in what was not stated; it
+never overrules what was.
+
 That answer goes into **Model built elsewhere?** on the Test Model page — for
 example `stretch bgr raw xyxy` — and from then on the model is fed the way it
 expects, and ultralytics is skipped, since it would only guess.

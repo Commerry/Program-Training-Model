@@ -178,6 +178,59 @@ check('it rules out every configuration fed the wrong channels or range',
 check('and keeps the one the model actually wants',
       'stretch bgr raw' in labels, sorted(labels))
 
+print('\n== recognised as a Custom Vision export, and fed accordingly ==')
+# Those three output names are what Azure Custom Vision exports a detector as,
+# and its own sample code feeds it exactly the way this model needs: squashed
+# into the square, BGR, pixels left at 0..255. That is not a coincidence -- the
+# model above was built to match, so the recognition can be checked by whether
+# the default configuration now finds the rectangle without being told to.
+default = OnnxDetector(model_path, display_name='blue.onnx')
+check('the export is recognised', default.source == 'Azure Custom Vision',
+      default.source)
+check('and fed the way that export wants',
+      (default.resize, default.channels, default.scale) == ('stretch', 'bgr', 'raw'),
+      (default.resize, default.channels, default.scale))
+untold = default.predict(frames[0], threshold=0.5)
+check('so it finds the rectangle with nothing set by hand',
+      len(untold) == 1 and all(abs(a - b) <= 4 for a, b in
+                               zip(untold[0]['box'], [140, 110, 260, 190])),
+      untold)
+
+print('\n== a choice made by hand still wins ==')
+told = OnnxDetector(model_path, display_name='blue.onnx', channels='rgb')
+check('the recognised export does not overrule it', told.channels == 'rgb',
+      told.channels)
+check('and the rest is still filled in from the export',
+      (told.resize, told.scale) == ('stretch', 'raw'), (told.resize, told.scale))
+
+print('\n== the export folder is read when it is there ==')
+folder_export = TMP / 'export'
+folder_export.mkdir()
+shutil.copy(model_path, folder_export / 'model.onnx')
+(folder_export / 'cvexport.manifest').write_text('{}', encoding='utf-8')
+(folder_export / 'labels.txt').write_text('Bad\nCuffRoll\nCuffTear\n',
+                                          encoding='utf-8')
+(folder_export / 'metadata_properties.json').write_text(
+    '{"CustomVision.Preprocess.NormalizeMean": "[0.0, 0.0, 0.0]",'
+    ' "CustomVision.Preprocess.NormalizeStd": "[1.0, 1.0, 1.0]",'
+    ' "CustomVision.Preprocess.ResizeMethod": "ByPixelCount",'
+    ' "CustomVision.Preprocess.TargetWidth": "320",'
+    ' "CustomVision.Preprocess.TargetHeight": "320"}', encoding='utf-8')
+
+from_folder = OnnxDetector(folder_export / 'model.onnx', display_name='model.onnx')
+check('the class names come from labels.txt',
+      from_folder.labels == ['Bad', 'CuffRoll', 'CuffTear'], from_folder.labels)
+check('and an identity normalisation raises no note',
+      from_folder.notes == [], from_folder.notes)
+
+(folder_export / 'metadata_properties.json').write_text(
+    '{"CustomVision.Preprocess.NormalizeMean": "[0.485, 0.456, 0.406]",'
+    ' "CustomVision.Preprocess.NormalizeStd": "[1.0, 1.0, 1.0]"}',
+    encoding='utf-8')
+warned = OnnxDetector(folder_export / 'model.onnx', display_name='model.onnx')
+check('a normalisation this runner does not apply is reported, not ignored',
+      any('mean' in note for note in warned.notes), warned.notes)
+
 print('\n== and writes the pictures to settle the rest ==')
 # The channels and the pixel range are decided by the numbers. The fitting and
 # the box order are not: both give boxes that look reasonable on their own and

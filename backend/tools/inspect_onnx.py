@@ -73,6 +73,24 @@ def main(argv):
             value = custom[key]
             print(f'\n{key} reads as: {value[:200]}')
 
+    print('\nthe folder it came from')
+    from services import onnxrunner
+    beside = onnxrunner.sidecars(path)
+    if beside.get('is_custom_vision'):
+        print('  cvexport.manifest is here: this is an Azure Custom Vision '
+              'export, which is fed nothing like a YOLO')
+    if beside.get('labels'):
+        names = beside['labels']
+        print(f'  labels.txt: {len(names)} class(es) -- {", ".join(names[:6])}'
+              + (' ...' if len(names) > 6 else ''))
+    for key, value in sorted((beside.get('metadata') or {}).items()):
+        if 'Preprocess' in key or 'Postprocess' in key:
+            print(f'  {key.split(".")[-1]:18} {value}')
+    if not any(beside.get(k) for k in ('labels', 'metadata', 'is_custom_vision')):
+        print('  (nothing beside the model -- run this on the file in its own '
+              'export folder, which carries the class names and the '
+              'preprocessing)')
+
     print('\nrun it, and see what comes back')
     try:
         import numpy as np
@@ -83,6 +101,12 @@ def main(argv):
         found = detector.predict(frame, threshold=0.01)
         print(f'  read as the {detector.layout} layout, '
               f'{len(found)} detection(s) on a blank frame')
+        if detector.source:
+            print(f'  recognised as: {detector.source}')
+        print(f'  fed as: {detector.resize} {detector.channels} '
+              f'{detector.scale} {detector.box_order}')
+        for note in getattr(detector, 'notes', []):
+            print(f'  note: {note}')
         print('  this file will run in the Test Model page.')
     except Exception as exc:  # noqa: BLE001
         print(f'  {type(exc).__name__}: {exc}')
