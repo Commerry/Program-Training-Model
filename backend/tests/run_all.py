@@ -52,6 +52,8 @@ SUITES = [
      'telling one upload from another, and labelling just the new one'),
     ('report export', TESTS / 'test_report_export.py', False,
      'a model test written out as a spreadsheet, pictures included'),
+    ('onnx layouts', TESTS / 'test_onnx_layouts.py', False,
+     'a detector built by other tooling, in each shape one arrives in'),
     ('fine tune', TESTS / 'test_fine_tune.py', True,
      'continuing from a trained model instead of starting over'),
     ('detect and accuracy', TESTS / 'test_detect_and_accuracy.py', True,

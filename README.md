@@ -572,6 +572,53 @@ The one thing lost on this path is the class names, which live in the metadata
 being ignored. Type them into **Label Names** and they are used; leave it empty
 and the classes come back numbered.
 
+### There is no single YOLO output layout
+
+Assuming the fused one was the next thing to go wrong, and it produced
+
+```
+"model.onnx" gives 1 values per anchor
+```
+
+on a model that was perfectly fine. A detector built elsewhere hands its
+results back in whichever shape its exporter chose, so every output is read
+and the shapes that come back decide how to decode them:
+
+| layout | shape | where it comes from |
+| --- | --- | --- |
+| fused | one `[1, 4+classes, anchors]` | ultralytics by default, and this app |
+| decoded | `[1, n, 6]` of x1 y1 x2 y2 score class | exported with NMS baked in |
+| batched | `[n, 7]` of batch x1 y1 x2 y2 class score | YOLOv5/v7 end2end |
+| split | num_dets / boxes / scores / labels | TensorRT EfficientNMS, most edge toolchains |
+| per-stride | three `[1, channels, h, w]` | the un-fused head a Luxonis blob is built from |
+
+Telling them apart takes more than the shape. A two-class fused model and a
+table of decoded rows both end in six numbers, and class ids of 0 and 1 look
+like confidences. What settles it is that corners satisfy `x1 <= x2` while a
+centre and a width do not, unless the object is hard against the left edge.
+
+Each layout is tested with one object at a known position, because a decoder
+reading the columns in the wrong order still returns detections and they are
+all in the wrong place. The per-stride case includes the distance decoding
+ultralytics does inside the model when it exports fused, and does not when it
+does not.
+
+Three of the five make ultralytics raise while running rather than while
+loading, so the fallback covers both: a model that loads and then fails on the
+first image hands the whole batch over rather than failing thirty-six times.
+
+The page reports which path and which layout were used.
+
+### When a model still will not run
+
+```bash
+python backend/tools/inspect_onnx.py path/to/model.onnx
+```
+
+Prints the inputs, outputs, metadata, and which layout the file looks like,
+without needing the server or a project. Its output is what is needed to add a
+layout that is not yet handled; an error message on its own is not.
+
 ## A test run as a spreadsheet
 
 The results grid answers "did it work" while you are looking at it. Handing

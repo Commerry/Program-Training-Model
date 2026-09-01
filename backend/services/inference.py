@@ -349,8 +349,11 @@ def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
             })
 
     # The class names are not in the graph, only in the metadata this path
-    # exists to ignore, so anything not supplied stays numbered.
-    device = (f'onnxruntime (ultralytics could not load this file: '
+    # exists to ignore, so anything not supplied stays numbered. The layout is
+    # worth saying: somebody testing a model from elsewhere wants to know how
+    # it was read, not only that it was.
+    layout = f', {detector.layout} output' if detector.layout else ''
+    device = (f'onnxruntime{layout} (ultralytics could not read this file: '
               f'{type(reason).__name__})')
     return results, device, active, failures
 
@@ -412,6 +415,15 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size,
             prediction = model.predict(bgr, conf=threshold, verbose=False,
                                        imgsz=img_size)[0]
         except Exception as exc:  # noqa: BLE001 - reported per image
+            # An ONNX whose output ultralytics does not recognise loads
+            # cleanly and then raises here, on every image alike -- an export
+            # with NMS baked in, or an un-fused head, will do this. Failing
+            # thirty-six times over is no better than failing once, so the
+            # whole batch goes to the direct runner instead.
+            if not results and Path(model_path).suffix.lower() == '.onnx':
+                return _run_onnx_directly(model_path, images, threshold,
+                                          label_names or embedded, img_size,
+                                          exc, display_name)
             failures.append({'filename': filename,
                              'reason': f'{type(exc).__name__}: {str(exc)[:200]}'})
             continue
