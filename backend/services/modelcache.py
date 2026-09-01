@@ -83,8 +83,12 @@ def _load_ultralytics(path):
     except ImportError:
         raise ProjectError('ultralytics is not installed. Run: pip install ultralytics',
                            status=500)
-    model = YOLO(str(path))
-    names = getattr(model, 'names', None)
+    try:
+        model = YOLO(str(path))
+        names = getattr(model, 'names', None)
+    except Exception as exc:  # noqa: BLE001 - the live paths need this too
+        from services.inference import _loading_failed
+        _loading_failed(path, exc)
     if isinstance(names, dict) and names:
         labels = [str(names[key]) for key in sorted(names)]
     elif isinstance(names, (list, tuple)) and names:

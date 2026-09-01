@@ -103,19 +103,37 @@ def _draw_box(image, x1, y1, x2, y2, text):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.52, foreground, 1, cv2.LINE_AA)
 
 
+# A detector letterboxes every frame to a square, and the arithmetic that
+# does it divides by the smaller side. A frame narrower than this makes that
+# division collapse and OpenCV raises deep inside the trainer's own code,
+# which reached the browser as an unexplained 500.
+MIN_IMAGE_SIDE = 8
+
+
 def _load_images(image_files):
-    images = []
+    """Readable images, and a reason for every file that is not one."""
+    images, rejected = [], []
     for file in image_files[:MAX_IMAGES]:
         if not file or not file.filename:
             continue
         buffer = np.frombuffer(file.read(), np.uint8)
         if buffer.size == 0:
+            rejected.append({'filename': file.filename, 'reason': 'the file is empty'})
             continue
         decoded = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
         if decoded is None:
+            rejected.append({'filename': file.filename,
+                             'reason': 'not an image this build can read'})
+            continue
+        height, width = decoded.shape[:2]
+        if min(height, width) < MIN_IMAGE_SIDE:
+            rejected.append({
+                'filename': file.filename,
+                'reason': f'{width}x{height} is too small to run a detector over',
+            })
             continue
         images.append((file.filename, decoded))
-    return images
+    return images, rejected
 
 
 def _encode(image):
@@ -145,8 +163,11 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
     else:
         raise ProjectError('Select a model file, or pick one this server trained')
 
-    images = _load_images(image_files or [])
+    images, rejected = _load_images(image_files or [])
     if not images:
+        if rejected:
+            listed = '; '.join(f'{r["filename"]}: {r["reason"]}' for r in rejected[:3])
+            raise ProjectError(f'None of those images could be used. {listed}')
         raise ProjectError('Select at least one readable image')
 
     suffix = Path(source_name).suffix.lower()
@@ -192,16 +213,18 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
             img_size = native
 
         if suffix == '.pth':
-            results, device_label, used_labels = _run_frcnn(
-                temp_path, images, score_threshold, label_names, img_size
+            results, device_label, used_labels, failures = _run_frcnn(
+                temp_path, images, score_threshold, label_names, img_size,
+                display_name=source_name
             )
             if not label_names and used_labels:
                 label_names = used_labels
                 label_source = 'generated from the checkpoint'
             model_format = 'pth'
         else:
-            results, device_label, used_labels = _run_ultralytics(
-                temp_path, images, score_threshold, label_names, img_size
+            results, device_label, used_labels, failures = _run_ultralytics(
+                temp_path, images, score_threshold, label_names, img_size,
+                display_name=source_name
             )
             if not label_names and used_labels:
                 label_names = used_labels
@@ -218,6 +241,10 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
             'total_images': len(results),
             'img_size': img_size,
             'results': results,
+            # Files that never reached the model, and why. Previously they were
+            # dropped in silence, so a request with three images could come
+            # back with two results and nothing to say where the third went.
+            'rejected': rejected + failures,
         }
     finally:
         # Only the temporary copy of an upload is ours to remove; a model the
@@ -234,7 +261,43 @@ def run_inference(model_file=None, image_files=None, score_threshold=0.5,
                 pass
 
 
-def _run_ultralytics(model_path, images, threshold, label_names, img_size):
+def _loading_failed(path, exc, display_name=None):
+    """
+    Turn a failure to load someone else's model into something they can act on.
+
+    Any model this application did not export is a model built by other tooling
+    with its own conventions, and ultralytics raises from deep inside its own
+    backend when it meets one it cannot wrap -- an IndexError on an empty input
+    list, a protobuf parse error, a shape its decoder does not know. All of
+    those reached the browser as "Internal server error. Check the server log",
+    which is no use to somebody who is not holding the server log.
+    """
+    from pathlib import Path as _Path
+    name = display_name or _Path(path).name
+    detail = f'{type(exc).__name__}: {str(exc)[:220]}'
+
+    hint = ''
+    text = str(exc).lower()
+    if 'protobuf' in text or 'invalid' in text and 'onnx' in name.lower():
+        hint = (' The file does not parse as ONNX at all -- it may be truncated '
+                'or may not be the file you meant.')
+    elif 'index out of range' in text or 'input' in text:
+        hint = (' The graph does not present the single image input a detector '
+                'is expected to have.')
+    elif 'shape' in text or 'dimension' in text:
+        hint = (' Its input or output shape is not one this runtime knows how '
+                'to drive.')
+
+    raise ProjectError(
+        f'"{name}" could not be loaded. {detail}.{hint} '
+        'Models exported by other tooling do not always follow the layout '
+        'ultralytics expects; a .pt, or an ONNX exported from one, is the '
+        'surest thing to test with.'
+    )
+
+
+def _run_ultralytics(model_path, images, threshold, label_names, img_size,
+                     display_name=None):
     """Run a YOLO / RT-DETR model (.pt, .onnx, .torchscript). Classes are 0-based."""
     try:
         from ultralytics import YOLO
@@ -243,7 +306,16 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size):
             'ultralytics is not installed. Run: pip install ultralytics', status=500
         )
 
-    model = YOLO(str(model_path))
+    try:
+        model = YOLO(str(model_path))
+        # Touch the backend now rather than on the first image, so a model that
+        # cannot be driven is reported before any work is done.
+        _ = getattr(model, 'names', None)
+    except ProjectError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        _loading_failed(model_path, exc, display_name)
+
     # Models trained by this app carry their class names; prefer them over
     # whatever the user typed only when the user typed nothing.
     embedded = None
@@ -261,8 +333,19 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size):
         return f'class_{class_id}'
 
     results = []
+    failures = []
     for filename, bgr in images:
-        prediction = model.predict(bgr, conf=threshold, verbose=False, imgsz=img_size)[0]
+        # One image that the model cannot process must not lose the whole
+        # batch. Ultralytics raises from inside its own letterboxing on shapes
+        # it cannot handle, and that reached the browser as a bare 500 with
+        # nothing to say which picture caused it.
+        try:
+            prediction = model.predict(bgr, conf=threshold, verbose=False,
+                                       imgsz=img_size)[0]
+        except Exception as exc:  # noqa: BLE001 - reported per image
+            failures.append({'filename': filename,
+                             'reason': f'{type(exc).__name__}: {str(exc)[:200]}'})
+            continue
         boxes = prediction.boxes
         annotated = bgr.copy()
         detections = []
@@ -293,10 +376,11 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size):
                 'annotated_image': encoded,
             })
 
-    return results, 'ultralytics', embedded
+    return results, 'ultralytics', embedded, failures
 
 
-def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
+def _run_frcnn(model_path, images, threshold, label_names, img_size=640,
+               display_name=None):
     """
     Run a torchvision Faster R-CNN state_dict (.pth). Classes are 1-based.
 
@@ -312,7 +396,11 @@ def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
     from training.frcnn_lib import create_model
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    state_dict = torch.load(str(model_path), map_location=device, weights_only=True)
+    try:
+        state_dict = torch.load(str(model_path), map_location=device,
+                                weights_only=True)
+    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+        _loading_failed(model_path, exc, display_name)
 
     class_weight = state_dict.get('roi_heads.box_predictor.cls_score.weight')
     if class_weight is None:
@@ -334,11 +422,18 @@ def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
         return str(active_labels[index]) if index < len(active_labels) else f'class_{class_id}'
 
     results = []
+    failures = []
     for filename, bgr in images:
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().div_(255.0).to(device)
-        with torch.no_grad():
-            output = model([tensor])[0]
+        try:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            tensor = torch.from_numpy(rgb).permute(2, 0, 1).float().div_(255.0)
+            tensor = tensor.to(device)
+            with torch.no_grad():
+                output = model([tensor])[0]
+        except Exception as exc:  # noqa: BLE001 - reported per image
+            failures.append({'filename': filename,
+                             'reason': f'{type(exc).__name__}: {str(exc)[:200]}'})
+            continue
 
         boxes = output['boxes'].cpu().numpy()
         scores = output['scores'].cpu().numpy()
@@ -373,7 +468,7 @@ def _run_frcnn(model_path, images, threshold, label_names, img_size=640):
                 'annotated_image': encoded,
             })
 
-    return results, str(device), active_labels
+    return results, str(device), active_labels, failures
 
 
 # ── Live and per-frame detection ────────────────────────────────────────────

@@ -399,6 +399,23 @@
 
         <!-- Results grid -->
         <div v-else>
+          <!--
+            Files the model never saw, and why. They used to vanish: a request
+            with three images came back with two results and nothing to say
+            where the third went, or failed the whole batch with a bare 500.
+          -->
+          <div v-if="rejected.length" class="rejected-bar">
+            <Icon name="alert-triangle" size="sm" />
+            <div>
+              <strong>{{ rejected.length }} file(s) could not be processed</strong>
+              <ul>
+                <li v-for="item in rejected" :key="item.filename">
+                  <code>{{ item.filename }}</code> — {{ item.reason }}
+                </li>
+              </ul>
+            </div>
+          </div>
+
           <div class="results-summary-bar">
             <span class="rs-label">{{ results.length }} image(s)</span>
             <span class="rs-det">
@@ -640,6 +657,7 @@ const readingOf = (detections) => {
 // where a detector's own confidence stops being a majority.
 const UNCERTAIN_BELOW = 0.5
 
+const rejected = ref([])
 const detail = ref(null)
 const exporting = ref(false)
 
@@ -971,6 +989,7 @@ const runTest = async () => {
   loading.value = true
   error.value   = ''
   results.value = []
+  rejected.value = []
 
   try {
     const res = await trainingService.testModel(
@@ -989,6 +1008,7 @@ const runTest = async () => {
     }
     resolvedLabelSource.value = res.resolved_label_source || ''
     results.value = res.results || []
+    rejected.value = res.rejected || []
   } catch (err) {
     error.value = errorMessage(err, 'The model could not be run')
   } finally {
@@ -1674,6 +1694,29 @@ const runTest = async () => {
 
 .result-card--clickable:hover {
   border-color:var(--accent);
+}
+
+.rejected-bar {
+  display:flex;
+  align-items:flex-start;
+  gap:0.6rem;
+  margin-bottom:0.8rem;
+  padding:0.7rem 0.9rem;
+  border:1px solid var(--warning-300);
+  border-radius:var(--radius-md);
+  background:var(--warning-100);
+  color:var(--warning-700);
+  font-size:0.85rem;
+}
+
+.rejected-bar ul {
+  margin:0.35rem 0 0;
+  padding-left:1.1rem;
+}
+
+.rejected-bar code {
+  font-family:var(--font-mono);
+  font-size:0.92em;
 }
 
 .rs-uncertain {

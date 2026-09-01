@@ -517,6 +517,33 @@ rather than learning from it, and few images benefit from more passes, so a
 project under 60 annotated images is told to use yolo11n or yolo11s and to
 raise the epochs rather than accept the default.
 
+## Testing a model this application did not train
+
+Any model built by other tooling follows its own conventions, and ultralytics
+raises from deep inside its own backend when it meets one it cannot wrap: an
+IndexError on an empty input list, a protobuf parse failure, an output shape
+its decoder does not know. Every one of those reached the browser as
+
+```
+Internal server error. Check the server log for details.
+```
+
+which is no use to anyone who is not holding the server log. Loading is now
+caught wherever it happens and reported with the file's real name — the one
+that was chosen, not the temporary name it was saved under — and the underlying
+error:
+
+```
+"model.onnx" could not be loaded. InvalidProtobuf: Load model failed:
+Protobuf parsing failed. The file does not parse as ONNX at all — it may be
+truncated or may not be the file you meant.
+```
+
+A file that cannot be read as an image, or is too small for a detector to
+letterbox, is reported the same way rather than crashing the request; and one
+bad image among thirty-six no longer loses the other thirty-five. The results
+page lists what was left out and why.
+
 ## A test run as a spreadsheet
 
 The results grid answers "did it work" while you are looking at it. Handing

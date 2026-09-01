@@ -76,7 +76,40 @@ RESULTS = [
      'annotated_image': preview(3), 'detections': []},
 ]
 
-print('== the workbook is written ==')
+print('== a model this application did not export ==')
+# Anything built by other tooling follows its own conventions, and ultralytics
+# raises from deep inside its own backend when it meets one it cannot wrap.
+# Those failures used to reach the browser as "Internal server error", which is
+# no use to somebody who is not holding the server log.
+broken = Path(tempfile.mkdtemp()) / 'model.onnx'
+broken.write_bytes(b'this is not an onnx file')
+frame = np.full((240, 320, 3), 60, np.uint8)
+encoded = cv2.imencode('.jpg', frame)[1].tobytes()
+
+r = c.post('/api/models/test', data={
+    'images': [(io.BytesIO(encoded), 'a.jpg')],
+    'model': (io.BytesIO(broken.read_bytes()), 'model.onnx'),
+    'score_threshold': '0.5',
+}, content_type='multipart/form-data')
+message = (r.get_json() or {}).get('message', '')
+check('an unloadable model is a 400, not a 500', r.status_code == 400,
+      (r.status_code, message[:90]))
+check('the message names the file the user chose', 'model.onnx' in message,
+      message[:90])
+check('and says what went wrong', len(message) > 60, message)
+
+print('\n== an image the detector cannot letterbox ==')
+sliver = cv2.imencode('.jpg', np.full((800, 1, 3), 60, np.uint8))[1].tobytes()
+r = c.post('/api/models/test', data={
+    'images': [(io.BytesIO(sliver), 'sliver.jpg')],
+    'model': (io.BytesIO(broken.read_bytes()), 'model.onnx'),
+}, content_type='multipart/form-data')
+check('a degenerate image is refused before the model is even loaded',
+      r.status_code == 400
+      and 'sliver.jpg' in (r.get_json() or {}).get('message', ''),
+      (r.status_code, (r.get_json() or {}).get('message', '')[:90]))
+
+print('\n== the workbook is written ==')
 data = report.build_workbook(RESULTS, meta={
     'model_name': 'best.pt', 'device': 'cuda', 'score_threshold': 0.25})
 check('it produced bytes', isinstance(data, bytes) and len(data) > 5000, len(data))
