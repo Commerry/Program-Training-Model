@@ -566,9 +566,18 @@ def save_annotations(name, filename, regions):
     for key in ('augmented', 'augmentation',   # a copy is not re-augmented
                 'batch', 'imported_at',        # which upload it arrived in
                 'original_name',               # what the file was called
-                'auto_labelled', 'auto_label'):  # drawn by a model, for review
+                'auto_labelled', 'auto_label',  # drawn by a model, for review
+                'review'):                     # and what a person changed
         if key in existing:
             data[key] = existing[key]
+
+    # A prediction and the correction of it only both exist for this instant.
+    # What the person changed is the one signal worth training on -- and once
+    # the save is written, the prediction is gone and it cannot be recovered.
+    from services import review as review_service
+    entry = review_service.record_for(existing, clean)
+    if entry:
+        data['review'] = entry
 
     write_annotation(name, filename, data)
     _update_index_entry(name, filename, data)

@@ -694,6 +694,41 @@ and wrongly, which is the whole failure this path exists to stop.
 Anything set by hand still wins. Recognition fills in what was not stated; it
 never overrules what was.
 
+### Learning from corrections, not from its own answers
+
+A pre-labelled picture that somebody has corrected is worth more than either
+half of it. The boxes they kept say the model was right, the ones they moved
+say it was close, the ones they deleted are false positives, and the ones they
+drew are objects it missed. Those four are the whole of what there is to learn
+from, and they exist only for as long as it takes to save the correction over
+the prediction — after that the prediction is gone.
+
+So the comparison is made at the moment of saving and stored with the image.
+It is arithmetic: box overlap and label equality, with no contribution from
+the model. That is the point of it. A system trained on its own predictions
+grows more certain and no more correct, because it marks its own work; every
+number it reports goes up while the thing gets worse. A system trained on
+corrections is being told, by somebody who looked, where it was wrong.
+
+Two thresholds decide whether a prediction and a saved box are the same
+object. Detection scoring uses 0.5 overlap and that is right when the labels
+disagree. It is wrong when they agree: a person dragging a box properly onto
+its object lands around 0.45, and calling that a deletion plus a fresh drawing
+turns one correction into two facts that are both false — a false positive the
+model never made and a miss it did not have. Matching labels are paired at 0.3.
+
+`GET /api/projects/<name>/review/queue` returns the pictures nobody has
+checked, least certain first. A picture the model scored 0.95 on teaches
+nothing whether it was right or wrong; one at 0.45 is the boundary it has not
+learned, and correcting that is what moves it. Reviewing thirty in this order
+does more than three hundred in upload order.
+
+`GET /api/projects/<name>/review/summary` adds the corrections up per class. A
+class mostly *relabelled* is being confused with another; mostly *added* is
+being missed; mostly *deleted* is being imagined. Three different problems
+with three different fixes, and a single accuracy number distinguishes none of
+them.
+
 ### Pre-labelling with a detector from somewhere else
 
 Auto-labelling saves the most work on a project with no annotations at all,

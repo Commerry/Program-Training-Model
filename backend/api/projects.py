@@ -170,6 +170,34 @@ def preview_auto_label(project_name):
     ))
 
 
+@projects_bp.get('/<project_name>/review/queue')
+def review_queue(project_name):
+    """
+    Pre-labelled pictures nobody has checked yet, the least certain first.
+
+    A picture the model was confident about teaches nothing whether it was
+    right or wrong; the ones it hesitated over are where the next bit of
+    accuracy is.
+    """
+    from services import review
+    return ok(review.queue(project_name,
+                           limit=request.args.get('limit', 50, type=int)))
+
+
+@projects_bp.get('/<project_name>/review/summary')
+def review_summary(project_name):
+    """
+    What people have corrected, per class.
+
+    Arithmetic over what was actually changed, with no contribution from the
+    model: a class mostly relabelled is being confused, one mostly added is
+    being missed, one mostly deleted is being imagined. Three problems, three
+    fixes, and one accuracy number tells them apart from none of the others.
+    """
+    from services import review
+    return ok(review.project_summary(project_name))
+
+
 @projects_bp.get('/<project_name>/class-accuracy')
 def class_accuracy(project_name):
     """How well the newest finished run did on each class."""
