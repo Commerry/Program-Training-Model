@@ -98,6 +98,41 @@ check('the message names the file the user chose', 'model.onnx' in message,
       message[:90])
 check('and says what went wrong', len(message) > 60, message)
 
+print('\n== an export whose metadata ultralytics cannot digest ==')
+# The graph in such a file is perfectly good. One user's model failed with
+#   TypeError: empty(): argument 'size' ... but got str
+# which is a metadata value going straight into torch: nothing wrong with the
+# model, only with the note attached to it. The graph is run directly instead.
+import glob                                             # noqa: E402
+import onnx                                             # noqa: E402
+
+source = sorted(glob.glob(str(
+    REPO / 'data' / 'projects' / '*' / 'training' / 'runs' / '*' / 'weights' / 'best.onnx')))
+if source:
+    spoiled = Path(tempfile.mkdtemp()) / 'model.onnx'
+    graph = onnx.load(source[0])
+    props = [kv for kv in graph.metadata_props if kv.key != 'imgsz']
+    del graph.metadata_props[:]
+    graph.metadata_props.extend(props)
+    entry = graph.metadata_props.add()
+    entry.key, entry.value = 'imgsz', 'not a size at all'
+    onnx.save(graph, str(spoiled))
+
+    r = c.post('/api/models/test', data={
+        'images': [(io.BytesIO(encoded), 'a.jpg')],
+        'model': (io.BytesIO(spoiled.read_bytes()), 'model.onnx'),
+        'score_threshold': '0.25',
+    }, content_type='multipart/form-data')
+    body = r.get_json() or {}
+    check('it still runs', r.status_code == 200,
+          (r.status_code, str(body.get('message'))[:80]))
+    check('and says the graph was driven directly',
+          'onnxruntime' in str(body.get('device', '')), body.get('device'))
+    check('returning a result for the image', len(body.get('results') or []) == 1,
+          len(body.get('results') or []))
+else:
+    print('    (no ONNX export on this checkout; skipped)')
+
 print('\n== an image the detector cannot letterbox ==')
 sliver = cv2.imencode('.jpg', np.full((800, 1, 3), 60, np.uint8))[1].tobytes()
 r = c.post('/api/models/test', data={

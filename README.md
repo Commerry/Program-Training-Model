@@ -544,6 +544,34 @@ letterbox, is reported the same way rather than crashing the request; and one
 bad image among thirty-six no longer loses the other thirty-five. The results
 page lists what was left out and why.
 
+### When the metadata is the only thing wrong
+
+Ultralytics reads the metadata an exporter left in the file and trusts it. A
+model built elsewhere carries whatever that tooling wrote, and one export
+failed with
+
+```
+TypeError: empty(): argument 'size' failed to unpack the object at pos 2
+           with error "type must be tuple of ints, but got str"
+```
+
+which is a metadata value going straight into torch. Nothing was wrong with
+the model — the note attached to it was the wrong shape. A detector nobody can
+run because of a string in a metadata field is a poor outcome, so an ONNX that
+ultralytics refuses is now driven directly with onnxruntime, working from the
+graph and ignoring the metadata entirely.
+
+It understands the layout every YOLOv8/v9/v10/v11 export shares: an image in as
+`[1, 3, H, W]`, one tensor out of `[1, 4 + classes, anchors]`. Checked against
+ultralytics on a model both can load — the same detections at every threshold
+tried, with boxes agreeing to within a pixel, and suppression done per class as
+ultralytics does it. Anything genuinely different in shape is reported rather
+than guessed at.
+
+The one thing lost on this path is the class names, which live in the metadata
+being ignored. Type them into **Label Names** and they are used; leave it empty
+and the classes come back numbered.
+
 ## A test run as a spreadsheet
 
 The results grid answers "did it work" while you are looking at it. Handing

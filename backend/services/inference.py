@@ -296,6 +296,65 @@ def _loading_failed(path, exc, display_name=None):
     )
 
 
+def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
+                       reason, display_name=None):
+    """
+    Drive a YOLO-shaped ONNX with onnxruntime, when ultralytics will not.
+
+    Verified against ultralytics on a model both can load: same detections at
+    every threshold tried, with boxes agreeing to within a pixel.
+    """
+    from services import onnxrunner
+
+    detector = onnxrunner.OnnxDetector(model_path, img_size=img_size,
+                                       display_name=display_name)
+    active = list(label_names or [])
+
+    def label_for(class_id):
+        if 0 <= class_id < len(active):
+            return str(active[class_id])
+        return f'class_{class_id}'
+
+    results, failures = [], []
+    for filename, bgr in images:
+        try:
+            found = detector.predict(bgr, threshold=threshold)
+        except ProjectError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - reported per image
+            failures.append({'filename': filename,
+                             'reason': f'{type(exc).__name__}: {str(exc)[:200]}'})
+            continue
+
+        annotated = bgr.copy()
+        detections = []
+        for item in found:
+            x1, y1, x2, y2 = item['box']
+            name = label_for(item['class_id'])
+            _draw_box(annotated, x1, y1, x2, y2, f'{name} {item["score"]:.2f}')
+            detections.append({
+                'label_id': item['class_id'], 'label_name': name,
+                'score': round(item['score'], 4), 'box': [x1, y1, x2, y2],
+            })
+
+        encoded = _encode(annotated)
+        if encoded:
+            ordered = sort_reading_order(detections)
+            results.append({
+                'filename': filename,
+                'detection_count': len(ordered),
+                'detections': ordered,
+                'reading': reading_of(ordered),
+                'annotated_image': encoded,
+            })
+
+    # The class names are not in the graph, only in the metadata this path
+    # exists to ignore, so anything not supplied stays numbered.
+    device = (f'onnxruntime (ultralytics could not load this file: '
+              f'{type(reason).__name__})')
+    return results, device, active, failures
+
+
 def _run_ultralytics(model_path, images, threshold, label_names, img_size,
                      display_name=None):
     """Run a YOLO / RT-DETR model (.pt, .onnx, .torchscript). Classes are 0-based."""
@@ -313,7 +372,17 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size,
         _ = getattr(model, 'names', None)
     except ProjectError:
         raise
-    except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+    except Exception as exc:  # noqa: BLE001
+        # Ultralytics reads the metadata an exporter left in the file and
+        # trusts it. A model built elsewhere carries whatever that tooling
+        # wrote, and one user's export failed with
+        #   TypeError: empty(): argument 'size' ... but got str
+        # which is a metadata value going straight into torch. Nothing was
+        # wrong with the model; the note attached to it was the wrong shape.
+        # For ONNX we can drive the graph ourselves and ignore the note.
+        if Path(model_path).suffix.lower() == '.onnx':
+            return _run_onnx_directly(model_path, images, threshold,
+                                      label_names, img_size, exc, display_name)
         _loading_failed(model_path, exc, display_name)
 
     # Models trained by this app carry their class names; prefer them over
