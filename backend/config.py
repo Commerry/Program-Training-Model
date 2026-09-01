@@ -52,6 +52,13 @@ INSTANCE_DIR = REPO_ROOT / 'data' / 'instance'
 # happened to start in.
 WEIGHTS_CACHE_DIR = REPO_ROOT / 'data' / 'weights'
 
+# Models brought in from elsewhere -- an export from Custom Vision, a detector
+# from a previous system -- so they can pre-label a new project before this
+# installation has trained anything of its own. Each gets its own folder so the
+# files that belong with it travel with it: an ONNX carries no class names, and
+# nothing in it records how it wants to be fed.
+IMPORTED_MODELS_DIR = REPO_ROOT / 'data' / 'imported'
+
 # Ports. Frontend dev server proxies /api to the backend port.
 BACKEND_PORT = int(os.environ.get('BACKEND_PORT', 64031))
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 64030))

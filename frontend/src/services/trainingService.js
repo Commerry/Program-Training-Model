@@ -104,6 +104,34 @@ export const trainingService = {
   listTrainedModels: () => http.get('/models').then((r) => r.data.models || []),
 
   /**
+   * Bring in a detector built somewhere else, so it can pre-label a project
+   * that has nothing yet. It is stored as a folder: an ONNX carries no class
+   * names, and nothing in it records how it wants to be fed.
+   */
+  importModel: (modelFile, options = {}) => {
+    const form = new FormData()
+    form.append('model', modelFile)
+    if (options.name) form.append('name', options.name)
+    if (options.labelsFile) form.append('labels_file', options.labelsFile)
+    if (options.onnxConventions) form.append('onnx_conventions', options.onnxConventions)
+    return http
+      .post('/models/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data)
+  },
+
+  /** The class names for a model imported without them. */
+  setImportedLabels: (folderName, labelsFile) => {
+    const form = new FormData()
+    form.append('labels_file', labelsFile)
+    return http
+      .post(`/models/imported/${encodeURIComponent(folderName)}/labels`, form,
+            { headers: { 'Content-Type': 'multipart/form-data' } })
+      .then((r) => r.data)
+  },
+
+  listImportedModels: () => http.get('/models/imported').then((r) => r.data.models || []),
+
+  /**
    * Run a model over some images.
    *
    * `model` is either an uploaded File or, for one the server trained itself,

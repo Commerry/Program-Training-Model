@@ -694,6 +694,34 @@ and wrongly, which is the whole failure this path exists to stop.
 Anything set by hand still wins. Recognition fills in what was not stated; it
 never overrules what was.
 
+### Pre-labelling with a detector from somewhere else
+
+Auto-labelling saves the most work on a project with no annotations at all,
+which is exactly the moment this installation has no model of its own to
+offer. **Import model** in the annotation toolbar takes a detector from a
+previous system and puts it in the picker beside the ones trained here.
+
+The import is a folder rather than a file, because a model file is not enough
+on its own:
+
+```
+data/imported/<name>/model.onnx
+                    /labels.txt         the class names, in order
+                    /conventions.txt    how to feed it, when it is known
+                    /import.json        what it is and where it came from
+```
+
+The file is opened at import time and what it turns out to be is reported then
+— recognised as a Custom Vision export, the size it wants, how it will be fed
+— rather than leaving somebody to find out from a labelling pass that quietly
+did nothing. A file that cannot be opened is refused there and then, and
+nothing is left behind.
+
+Its class ids mean what its own labels.txt says, not what the project calls
+its tags. Falling back to the project's names would put a wrong word on every
+box while looking entirely correct, so it does not: without labels the classes
+stay numbered, which is obvious and correctable.
+
 ### The class names live in a separate file
 
 An ONNX carries no class names at all. A model this application trained is

@@ -380,11 +380,25 @@ def _run(name, weights, targets, score_threshold, img_size, lock):
 
 
 def _classes_for(name, weights):
-    """Class names for the model, preferring what the run recorded."""
+    """
+    Class names for the model, preferring what the run recorded.
+
+    A model brought in from elsewhere has none of that history, but it does
+    have the labels.txt that was imported with it -- and its class ids mean
+    what that file says, not what this project happens to call its own tags.
+    Falling back to the project's names would label every box with the wrong
+    word while looking entirely correct.
+    """
     for run in training.get_history(name):
         if run.get('best_model') and Path(run['best_model']) == weights:
             if run.get('classes'):
                 return [str(c) for c in run['classes']]
+
+    from services import onnxrunner
+    beside = onnxrunner.sidecars(weights).get('labels')
+    if beside:
+        return [str(c) for c in beside]
+
     return projects.class_names(name)
 
 
@@ -440,6 +454,50 @@ def _make_predictor(weights, img_size, score_threshold):
             return regions
 
         return predict
+
+    if suffix == '.onnx':
+        # A detector from elsewhere is the whole point of pre-labelling a
+        # project that has nothing yet, and ultralytics cannot drive most of
+        # them: an Azure Custom Vision export loads and then answers with one
+        # box over the whole picture, which as a pre-label is worse than none.
+        # The direct runner recognises the export and feeds it accordingly.
+        from services import imported, onnxrunner
+        stated = imported.conventions_for(weights)
+        # An ONNX this application exported is ultralytics' own, and going
+        # through ultralytics keeps the class names it stored. Anything
+        # recognisable as built elsewhere, or set up by hand, goes direct.
+        detector = None
+        if stated or onnxrunner.is_custom_vision_file(weights):
+            try:
+                chosen = onnxrunner.parse_conventions(stated)
+                detector = onnxrunner.OnnxDetector(weights, img_size=img_size,
+                                                   display_name=weights.name,
+                                                   **chosen)
+            except ProjectError:
+                detector = None
+
+        if detector is not None:
+            from services.imaging import imread
+
+            def predict(path, classes):
+                names = detector.labels or classes
+                bgr = imread(path)
+                if bgr is None:
+                    return []
+                regions = []
+                for item in detector.predict(bgr, threshold=score_threshold):
+                    index = int(item['class_id'])
+                    if not 0 <= index < len(names):
+                        continue
+                    x1, y1, x2, y2 = (float(v) for v in item['box'])
+                    if x2 - x1 < 1 or y2 - y1 < 1:
+                        continue
+                    regions.append({'tag': str(names[index]), 'x': x1, 'y': y1,
+                                    'width': x2 - x1, 'height': y2 - y1,
+                                    'score': round(float(item['score']), 4)})
+                return regions
+
+            return predict
 
     from ultralytics import YOLO
     model = YOLO(str(weights))

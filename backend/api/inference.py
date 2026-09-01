@@ -43,6 +43,44 @@ def test_model():
     ))
 
 
+@inference_bp.post('/models/import')
+def import_model():
+    """
+    Bring in a detector built somewhere else, so it can pre-label a project.
+
+    Pre-labelling is worth most on a project with nothing in it, which is
+    exactly when this installation has no model of its own to offer. The file
+    is kept in its own folder with the class names and, when they are known,
+    the conventions it wants to be fed with -- an ONNX carries neither.
+    """
+    from services import imported
+    return ok(imported.add(
+        request.files.get('model'),
+        name=(request.form.get('name') or '').strip() or None,
+        labels_file=request.files.get('labels_file'),
+        conventions=(request.form.get('onnx_conventions') or '').strip() or None,
+    ))
+
+
+@inference_bp.get('/models/imported')
+def list_imported_models():
+    from services import imported
+    return ok({'models': imported.list_models()})
+
+
+@inference_bp.post('/models/imported/<folder_name>/labels')
+def set_imported_labels(folder_name):
+    """Attach the class names to a model that was imported without them."""
+    from services import imported
+    return ok(imported.set_labels(folder_name, request.files.get('labels_file')))
+
+
+@inference_bp.delete('/models/imported/<folder_name>')
+def delete_imported_model(folder_name):
+    from services import imported
+    return ok(imported.remove(folder_name))
+
+
 def _staged_model(upload):
     """
     Keep an uploaded model on disk under a name derived from its contents.

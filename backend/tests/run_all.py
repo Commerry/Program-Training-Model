@@ -56,6 +56,8 @@ SUITES = [
      'a detector built by other tooling, in each shape one arrives in'),
     ('onnx conventions', TESTS / 'test_onnx_conventions.py', False,
      'working out how a model from elsewhere wants to be fed'),
+    ('imported models', TESTS / 'test_imported_models.py', False,
+     'a detector from elsewhere, pre-labelling a project that has nothing'),
     ('fine tune', TESTS / 'test_fine_tune.py', True,
      'continuing from a trained model instead of starting over'),
     ('detect and accuracy', TESTS / 'test_detect_and_accuracy.py', True,

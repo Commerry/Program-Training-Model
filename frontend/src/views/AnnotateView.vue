@@ -27,16 +27,44 @@
           what it suggests is the annotator's call every time.
         -->
         <select
-          v-if="detectModels.length"
           v-model="detectModel"
           class="toolbar-select"
           title="Model to detect with"
         >
-          <option :value="''">Choose a model…</option>
+          <option :value="''">
+            {{ detectModels.length ? 'Choose a model…' : 'No model yet — import one' }}
+          </option>
           <option v-for="model in detectModels" :key="model.path" :value="model.path">
             {{ model.project }} / {{ model.label }}
           </option>
         </select>
+        <!--
+          A detector from a previous system is worth the most here, on a
+          project with nothing in it, which is exactly when this installation
+          has no model of its own to offer. It arrives as a folder rather than
+          a file: an ONNX carries no class names and does not record how it
+          wants to be fed.
+        -->
+        <label class="btn btn-secondary" title="Import a model from elsewhere">
+          <input
+            type="file"
+            accept=".onnx,.pt,.pth,.torchscript"
+            style="display:none"
+            @change="importModel"
+          />
+          <Icon name="upload" size="sm" />
+          <span>{{ importing ? 'Importing...' : 'Import model' }}</span>
+        </label>
+        <label
+          v-if="pendingImport"
+          class="btn btn-secondary"
+          title="The class names that came with it (labels.txt)"
+        >
+          <input type="file" accept=".txt,.csv" style="display:none" @change="importLabels" />
+          <Icon name="tag" size="sm" />
+          <span>Add labels.txt</span>
+        </label>
+        <span v-if="importNote" class="import-note">{{ importNote }}</span>
         <button
           v-if="detectModels.length"
           class="btn btn-secondary"
@@ -614,6 +642,61 @@ const copyNotice = ref('')
 const detectModels = ref([])
 const detectModel = ref('')
 const detecting = ref(false)
+
+// A model brought in from elsewhere. Its class names arrive separately, in a
+// labels.txt, because an ONNX carries none -- so the import is offered in two
+// steps rather than refusing until both files are in hand.
+const importing = ref(false)
+const pendingImport = ref(null)
+
+const importNote = ref('')
+
+const importModel = async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || importing.value) return
+  importing.value = true
+  importNote.value = ''
+  try {
+    const record = await trainingService.importModel(file)
+    pendingImport.value = record
+    await loadDetectModels()
+    detectModel.value = record.path
+
+    const detail = record.detail || {}
+    const parts = [detail.source ? `Recognised as ${detail.source}` : 'Imported']
+    if (!(record.labels || []).length) {
+      // Worth saying plainly: without it every box comes back numbered, and a
+      // numbered box is correctable while a wrongly named one is not obvious.
+      parts.push('no class names yet — add the labels.txt that came with it')
+    }
+    if ((detail.notes || []).length) parts.push(detail.notes[0])
+    importNote.value = parts.join(' — ')
+  } catch (err) {
+    importNote.value = errorMessage(err, 'That model could not be imported')
+  } finally {
+    importing.value = false
+  }
+}
+
+const importLabels = async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || !pendingImport.value) return
+  try {
+    // The import lives in its own folder; that folder's name is what the
+    // endpoint takes. Windows hands back backslashes, so both separators
+    // are split on rather than one.
+    const folder = pendingImport.value.path.split(/[\\/]/).slice(-2)[0]
+    const record = await trainingService.setImportedLabels(folder, file)
+    pendingImport.value = record
+    await loadDetectModels()
+    detectModel.value = record.path
+    importNote.value = `${(record.labels || []).length} class name(s) loaded`
+  } catch (err) {
+    importNote.value = errorMessage(err, 'Those labels could not be loaded')
+  }
+}
 
 const loadDetectModels = async () => {
   try {
@@ -1229,6 +1312,13 @@ kbd {
 </style>
 
 <style scoped>
+.import-note {
+  font-size:0.74rem;
+  line-height:1.3;
+  max-width:26rem;
+  color:var(--text-tertiary, var(--text-3));
+}
+
 .toolbar-select {
   max-width:14rem;
   padding:0.4rem 0.6rem;

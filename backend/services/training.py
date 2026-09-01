@@ -777,6 +777,9 @@ def list_all_models():
             continue
         for model in found:
             everything.append({**model, 'project': name})
+
+    from services import imported
+    everything.extend(imported.list_models())
     return sorted(everything, key=lambda m: m['modified'], reverse=True)
 
 
@@ -797,8 +800,13 @@ def resolve_trained_model(raw_path):
     if not raw_path:
         raise ProjectError('A model path is required')
     candidate = Path(raw_path).resolve()
+    from config import IMPORTED_MODELS_DIR
     roots = [Path(PROJECTS_ROOT).resolve(),
-             Path(WEIGHTS_CACHE_DIR).resolve()]
+             Path(WEIGHTS_CACHE_DIR).resolve(),
+             # A model brought in from elsewhere is not one this server
+             # trained, but it is one this server was deliberately given, and
+             # pre-labelling a brand new project is exactly what it is for.
+             Path(IMPORTED_MODELS_DIR).resolve()]
     if not any(_is_within(candidate, root) for root in roots):
         raise ProjectError('That model is not one this server trained', status=403)
     if candidate.suffix.lower() not in DOWNLOADABLE_SUFFIXES:
