@@ -589,7 +589,8 @@ and the shapes that come back decide how to decode them:
 | fused | one `[1, 4+classes, anchors]` | ultralytics by default, and this app |
 | decoded | `[1, n, 6]` of x1 y1 x2 y2 score class | exported with NMS baked in |
 | batched | `[n, 7]` of batch x1 y1 x2 y2 class score | YOLOv5/v7 end2end |
-| split | num_dets / boxes / scores / labels | TensorRT EfficientNMS, most edge toolchains |
+| split | boxes / scores / labels, with or without a num_dets | TensorRT EfficientNMS, most edge toolchains |
+| boxes and scores | `[1, n, 4]` beside `[1, n, classes]` | exports that leave the suppression out |
 | per-stride | three `[1, channels, h, w]` | the un-fused head a Luxonis blob is built from |
 
 Telling them apart takes more than the shape. A two-class fused model and a
@@ -603,11 +604,26 @@ all in the wrong place. The per-stride case includes the distance decoding
 ultralytics does inside the model when it exports fused, and does not when it
 does not.
 
-Three of the five make ultralytics raise while running rather than while
-loading, so the fallback covers both: a model that loads and then fails on the
-first image hands the whole batch over rather than failing thirty-six times.
+A count is not always there to be found. One model arrived as
 
-The page reports which path and which layout were used.
+```
+detected_boxes[1, num, 4], detected_classes[1, num], detected_scores[1, num]
+```
+
+with `num` dynamic and the boxes as fractions of the input. On a frame holding
+a single object every one of those tensors holds a single value, so a decoder
+hunting for a num_dets among them finds the data instead. The count is only
+read when the shapes leave no doubt which tensor it is.
+
+Ultralytics fails on these three ways, and the fallback covers all three. It
+raises while loading. It raises while running, in which case a model that
+fails on the first image hands the whole batch over rather than failing
+thirty-six times. Or it loads, runs, raises nothing and finds nothing — which
+reads as "this model detects nothing" when the truth is that nobody decoded
+its output. An ONNX that comes back empty is retried directly, so that costs
+one extra pass only when the answer would have been empty anyway.
+
+The page reports which path and which layout were used, and why it switched.
 
 ### When a model still will not run
 

@@ -353,8 +353,9 @@ def _run_onnx_directly(model_path, images, threshold, label_names, img_size,
     # worth saying: somebody testing a model from elsewhere wants to know how
     # it was read, not only that it was.
     layout = f', {detector.layout} output' if detector.layout else ''
-    device = (f'onnxruntime{layout} (ultralytics could not read this file: '
-              f'{type(reason).__name__})')
+    why = (reason if isinstance(reason, str)
+           else f'ultralytics could not read this file: {type(reason).__name__}')
+    device = f'onnxruntime{layout} ({why})'
     return results, device, active, failures
 
 
@@ -456,6 +457,24 @@ def _run_ultralytics(model_path, images, threshold, label_names, img_size,
                 'reading': reading_of(ordered),
                 'annotated_image': encoded,
             })
+
+    # An ONNX whose output ultralytics half-recognises does not raise. It
+    # loads, it runs, and it finds nothing at all -- which reads as "this
+    # model detects nothing" when the truth is that nobody decoded its output.
+    # A second pass costs one run over the images and only happens when the
+    # answer would otherwise be empty, so a model that genuinely found nothing
+    # pays for it and nothing else does.
+    if (Path(model_path).suffix.lower() == '.onnx' and not failures
+            and not any(r['detection_count'] for r in results)):
+        try:
+            direct = _run_onnx_directly(model_path, images, threshold,
+                                        label_names or embedded, img_size,
+                                        'ultralytics ran but found nothing',
+                                        display_name)
+        except ProjectError:
+            direct = None
+        if direct and any(r['detection_count'] for r in direct[0]):
+            return direct
 
     return results, 'ultralytics', embedded, failures
 

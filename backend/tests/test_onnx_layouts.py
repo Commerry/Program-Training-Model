@@ -133,6 +133,38 @@ def split():
             ['num_dets', 'boxes', 'scores', 'labels'])
 
 
+def split_no_count():
+    """
+    detected_boxes / detected_classes / detected_scores, and no count.
+
+    A real model arrived shaped exactly like this, with `num` dynamic and the
+    boxes as fractions of the input rather than pixels. On a frame holding one
+    object every tensor here holds a single value, so a decoder looking for a
+    num_dets among them finds the data instead -- which is how this one came
+    back as "it returned (1, 1, 4), (1, 1), (1, 1)".
+    """
+    boxes = np.array([[[BOX_IN[0] / SIZE, BOX_IN[1] / SIZE,
+                        BOX_IN[2] / SIZE, BOX_IN[3] / SIZE]]], np.float32)
+    classes = np.array([[CLASS]], np.int64)
+    scores = np.array([[SCORE]], np.float32)
+    return ([torch.from_numpy(boxes), torch.from_numpy(classes),
+             torch.from_numpy(scores)],
+            ['detected_boxes', 'detected_classes', 'detected_scores'])
+
+
+def boxes_and_scores():
+    """[1, n, 4] beside [1, n, classes], with no suppression applied."""
+    n, classes = 200, 4
+    boxes = np.zeros((1, n, 4), np.float32)
+    matrix = np.zeros((1, n, classes), np.float32)
+    # The same object twice over, so the suppression this layout needs shows.
+    for row, nudge in ((0, 0.0), (1, 2.0)):
+        boxes[0, row] = [BOX_IN[0] + nudge, BOX_IN[1] + nudge,
+                         BOX_IN[2] + nudge, BOX_IN[3] + nudge]
+        matrix[0, row, CLASS] = SCORE - row * 0.05
+    return [torch.from_numpy(boxes), torch.from_numpy(matrix)], ['boxes', 'scores']
+
+
 def strides():
     """
     Three [1, 64 + classes, h, w] head outputs -- the un-fused export.
@@ -222,6 +254,8 @@ run('fused', fused, BOX_OUT, CLASS, 'fused')
 run('decoded', decoded, BOX_OUT, CLASS, 'decoded')
 run('batched', batched, BOX_OUT, CLASS, 'decoded')
 run('split', split, BOX_OUT, CLASS, 'split')
+run('split with no count', split_no_count, BOX_OUT, CLASS, 'split')
+run('boxes and scores', boxes_and_scores, BOX_OUT, CLASS, 'boxes and scores')
 # anchor (144,176) with 32px on every side -> [112,144,176,208] in the
 # network's view, which is [112, 64, 176, 128] in the photo.
 run('strides', strides, [112, 64, 176, 128], 2, 'per-stride')

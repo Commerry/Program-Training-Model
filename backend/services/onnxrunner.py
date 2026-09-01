@@ -290,54 +290,80 @@ class OnnxDetector:
 
     def _decode_split(self, arrays):
         """
-        num_dets / boxes / scores / labels, the TensorRT EfficientNMS layout.
+        Boxes, scores and classes as separate tensors, NMS already applied.
+
+        The layout most edge toolchains emit. Some add a num_dets saying how
+        many of a fixed number of slots are real; some leave the count as a
+        dynamic dimension and return exactly as many rows as there are
+        detections. One model arrived as
+
+            detected_boxes[1, num, 4], detected_classes[1, num],
+            detected_scores[1, num]
+
+        with no count at all, and on a frame holding a single object num is 1,
+        which makes every tensor here a single value and the count -- if one
+        were looked for -- indistinguishable from the data. So the count is
+        only read when the shapes leave no doubt about which tensor it is.
 
         Matched on shape rather than name, because the names differ between
-        every toolchain that emits it.
+        every toolchain that emits this.
         """
-        boxes = None
-        for array in arrays:
-            squeezed = array[0] if array.ndim == 3 and array.shape[0] == 1 else array
-            if squeezed.ndim == 2 and squeezed.shape[1] == 4 and boxes is None:
-                boxes = squeezed.astype(np.float32)
+        boxes = boxes_index = None
+        for index, array in enumerate(arrays):
+            flat = array.reshape(-1, 4) if array.size and array.shape[-1] == 4 \
+                and array.ndim in (2, 3) else None
+            if flat is not None and boxes is None:
+                boxes, boxes_index = flat.astype(np.float32), index
 
-        if boxes is None or boxes.shape[0] < 2:
+        if boxes is None:
+            return None
+        rows = boxes.shape[0]
+
+        # Anything holding one value per box. Reshaped rather than squeezed:
+        # a single detection makes a [1, 1] tensor squeeze down to a scalar,
+        # and that vector is exactly what is wanted.
+        vectors, spare = [], []
+        for index, array in enumerate(arrays):
+            if index == boxes_index:
+                continue
+            if array.size == rows:
+                vectors.append(array.reshape(-1))
+            else:
+                spare.append(array)
+        if not vectors:
             return None
 
-        # num_dets, whatever it is called and whichever of [1], [1, 1] or a
-        # bare scalar it was exported as: the only single-valued output here.
+        # A num_dets is only recognisable when it cannot be one of the above.
         count = None
-        for array in arrays:
+        for array in spare:
             if array.size == 1:
                 count = int(np.asarray(array).reshape(-1)[0])
                 break
 
-        candidates = []
-        for array in arrays:
-            squeezed = np.squeeze(array)
-            if squeezed.ndim == 1 and squeezed.shape[0] == boxes.shape[0]:
-                candidates.append(squeezed)
-        if not candidates:
-            return None
-
-        # Of the two per-detection vectors, one is the scores and one the
-        # class ids. Whole numbers mark the labels -- except with two classes,
-        # where the ids are 0 and 1 and look like scores too, so the tie is
-        # broken on which vector carries more distinct values.
+        # One vector is the scores and one the class ids. An integer dtype
+        # settles it outright, which is how most exporters write the classes.
+        # Failing that, whole numbers mark the labels -- except with two
+        # classes, where ids of 0 and 1 pass for confidences, so the tie goes
+        # to whichever vector carries more distinct values.
         scores = labels = None
-        if len(candidates) >= 2:
-            first, second = candidates[0], candidates[1]
-            first_is_int = _looks_like_class_column(first)
-            second_is_int = _looks_like_class_column(second)
-            if first_is_int != second_is_int:
-                labels, scores = ((first, second) if first_is_int
-                                  else (second, first))
-            elif len(np.unique(first)) >= len(np.unique(second)):
-                scores, labels = first, second
+        if len(vectors) >= 2:
+            first, second = vectors[0], vectors[1]
+            first_int = np.issubdtype(first.dtype, np.integer)
+            second_int = np.issubdtype(second.dtype, np.integer)
+            if first_int != second_int:
+                labels, scores = (first, second) if first_int else (second, first)
             else:
-                scores, labels = second, first
+                first_whole = _looks_like_class_column(first)
+                second_whole = _looks_like_class_column(second)
+                if first_whole != second_whole:
+                    labels, scores = ((first, second) if first_whole
+                                      else (second, first))
+                elif len(np.unique(first)) >= len(np.unique(second)):
+                    scores, labels = first, second
+                else:
+                    scores, labels = second, first
         else:
-            scores = candidates[0]
+            scores = vectors[0]
 
         scores = np.asarray(scores, np.float32)
         labels = (np.zeros(len(scores), np.int32) if labels is None
@@ -346,9 +372,43 @@ class OnnxDetector:
         if count is not None and 0 <= count <= len(scores):
             boxes, scores, labels = boxes[:count], scores[:count], labels[:count]
 
-        if boxes.size and np.nanmax(boxes) <= 1.5:
+        # Some of these hand back fractions of the input rather than pixels.
+        if boxes.size and np.nanmax(np.abs(boxes)) <= 1.5:
             boxes = boxes * self.size
         return boxes, scores, labels, False
+
+    def _decode_pair(self, arrays):
+        """
+        Boxes in one tensor, a score per class in another.
+
+        [1, n, 4] alongside [1, n, classes]: no NMS applied, which is what
+        separates this from the split layout above, so the boxes go through
+        suppression like a fused model's.
+        """
+        boxes = matrix = None
+        for array in arrays:
+            if array.ndim != 3 or array.shape[0] != 1:
+                continue
+            if array.shape[2] == 4 and boxes is None:
+                boxes = array[0].astype(np.float32)
+            elif array.shape[2] >= 1 and matrix is None:
+                matrix = array[0].astype(np.float32)
+
+        if boxes is None or matrix is None or matrix.shape[0] != boxes.shape[0]:
+            return None
+
+        class_ids = matrix.argmax(axis=1)
+        scores = matrix[np.arange(len(class_ids)), class_ids]
+        if scores.size and (scores.min() < 0.0 or scores.max() > 1.0):
+            scores = _sigmoid(scores)
+
+        if boxes.size and np.nanmax(np.abs(boxes)) <= 1.5:
+            boxes = boxes * self.size
+        if not _looks_like_corners(boxes):
+            cx, cy, w, h = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+            boxes = np.stack([cx - w / 2, cy - h / 2,
+                              cx + w / 2, cy + h / 2], axis=1)
+        return boxes, scores, class_ids.astype(np.int32), True
 
     def _decode_strides(self, arrays):
         """
@@ -424,11 +484,16 @@ class OnnxDetector:
 
     def _decode(self, arrays):
         """Work out which of the known layouts came back, and decode it."""
-        if len(arrays) >= 3:
+        if len(arrays) >= 2:
             split = self._decode_split(arrays)
             if split is not None:
                 self.layout = 'split'
                 return split
+
+            pair = self._decode_pair(arrays)
+            if pair is not None:
+                self.layout = 'boxes and scores'
+                return pair
 
             strides = self._decode_strides(arrays)
             if strides is not None:
