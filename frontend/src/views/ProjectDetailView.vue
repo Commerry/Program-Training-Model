@@ -235,6 +235,66 @@
           </table>
         </div>
 
+        <!--
+          A dataset already labelled elsewhere is worth more than a model
+          exported from it: a model is a frozen answer, the pictures can be
+          trained again, corrected and extended.
+        -->
+        <div class="import-dataset">
+          <div class="import-row">
+            <input
+              v-model="importFolder"
+              class="import-input"
+              type="text"
+              placeholder="Folder the dataset was exported to, e.g. D:\export"
+              @keyup.enter="checkImportFolder"
+            />
+            <button class="btn btn-secondary" :disabled="importChecking || importRunning"
+                    @click="checkImportFolder">
+              <Icon name="search" size="sm" />
+              <span>{{ importChecking ? 'Reading...' : 'Check folder' }}</span>
+            </button>
+          </div>
+          <p class="import-hint">
+            YOLO (images + labels + label.txt), COCO (.json) or Pascal VOC (.xml).
+            Read from the machine running the server.
+          </p>
+
+          <div v-if="importError" class="import-error">{{ importError }}</div>
+
+          <div v-if="importPreview" class="import-found">
+            <div>
+              <strong>{{ importPreview.format.toUpperCase() }}</strong>
+              — {{ importPreview.images }} annotation(s),
+              {{ importPreview.boxes ?? '?' }} box(es),
+              {{ (importPreview.classes || []).length }} class(es)
+              <span v-if="importPreview.classes_from">
+                from {{ importPreview.classes_from }}
+              </span>
+            </div>
+            <div v-if="(importPreview.classes || []).length" class="import-classes">
+              {{ importPreview.classes.join(', ') }}
+            </div>
+            <div v-for="warning in importPreview.warnings" :key="warning"
+                 class="import-warning">{{ warning }}</div>
+            <button v-if="!importRunning" class="btn btn-primary" @click="runDatasetImport">
+              <Icon name="download" size="sm" />
+              <span>Import {{ importPreview.images }} image(s)</span>
+            </button>
+          </div>
+
+          <div v-if="importJob" class="import-progress">
+            <span>{{ importJob.message || importJob.status }}</span>
+            <div v-if="importRunning" class="import-bar">
+              <div class="import-fill" :style="{ width: importPercent + '%' }"></div>
+            </div>
+            <button v-if="importRunning" class="btn btn-danger" @click="cancelDatasetImport">
+              <Icon name="x" size="sm" />
+              <span>Stop</span>
+            </button>
+          </div>
+        </div>
+
         <div class="augment-actions">
           <button
             v-if="!autoLabelRunning"
@@ -959,6 +1019,79 @@ const unannotatedCount = computed(
   () => store.images.filter((image) => !image.annotated).length
 )
 
+// ── a dataset labelled somewhere else ──────────────────────────────────────
+// Read from a folder on the machine running the server, not uploaded: six
+// thousand pictures is not a browser file picker's job, and the export
+// already sits on disk.
+const importFolder = ref('')
+const importPreview = ref(null)
+const importJob = ref(null)
+const importError = ref('')
+const importChecking = ref(false)
+
+const importRunning = computed(() => importJob.value?.status === 'running')
+const importPercent = computed(() => {
+  const job = importJob.value
+  if (!job?.total) return 0
+  return Math.round(((job.done || 0) / job.total) * 100)
+})
+
+const checkImportFolder = async () => {
+  if (!importFolder.value.trim() || importChecking.value) return
+  importChecking.value = true
+  importError.value = ''
+  importPreview.value = null
+  try {
+    importPreview.value = await projectService.previewDatasetImport(
+      projectName.value, importFolder.value.trim())
+  } catch (err) {
+    importError.value = errorMessage(err, 'That folder could not be read')
+  } finally {
+    importChecking.value = false
+  }
+}
+
+const runDatasetImport = async () => {
+  if (!importPreview.value) return
+  importError.value = ''
+  try {
+    const { job } = await projectService.startDatasetImport(
+      projectName.value, importFolder.value.trim())
+    importJob.value = job
+    pollDatasetImport()
+  } catch (err) {
+    importError.value = errorMessage(err, 'The import could not be started')
+  }
+}
+
+const cancelDatasetImport = async () => {
+  try {
+    await projectService.cancelDatasetImport(projectName.value)
+  } catch (err) {
+    importError.value = errorMessage(err, 'It could not be stopped')
+  }
+}
+
+let importTimer = null
+const pollDatasetImport = () => {
+  clearTimeout(importTimer)
+  importTimer = setTimeout(async () => {
+    try {
+      const { job } = await projectService.datasetImportStatus(projectName.value)
+      importJob.value = job
+      if (job?.status === 'running') {
+        pollDatasetImport()
+      } else if (job?.status === 'finished') {
+        // The gallery and the counters are both stale now.
+        await store.loadProject(projectName.value)
+        await store.loadImages(projectName.value)
+      }
+    } catch {
+      /* the next poll will pick it up */
+    }
+  }, 1200)
+}
+
 // Sorted server-side, which is what keeps each class's ROI colour stable.
 const projectClasses = computed(() => Object.keys(store.current?.tags || {}))
 
@@ -1075,6 +1208,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(stopAutoLabelPolling)
+onBeforeUnmount(() => clearTimeout(importTimer))
 
 const flash = (message) => {
   notice.value = message
@@ -1450,6 +1584,69 @@ const truncateFilename = (filename, maxLength = 20) => {
 .augment-auto-note small {
   color:var(--text-secondary);
   line-height:1.4;
+}
+
+.import-dataset {
+  border:1px solid var(--border-color, var(--border));
+  border-radius:12px;
+  padding:0.85rem;
+  margin-bottom:1rem;
+  background: var(--bg-subtle);
+}
+.import-row { display:flex; gap:0.5rem; flex-wrap:wrap; }
+.import-input {
+  flex:1 1 22rem;
+  min-width:14rem;
+  background: var(--bg);
+  border:1px solid var(--border-color, var(--border));
+  border-radius:10px;
+  padding:0.5rem 0.7rem;
+  font-family:inherit;
+  font-size:0.85rem;
+  color:var(--text-primary, var(--text));
+}
+.import-hint, .import-classes {
+  margin:0.5rem 0 0;
+  font-size:0.74rem;
+  line-height:1.5;
+  color:var(--text-tertiary, var(--text-3));
+}
+.import-classes { word-break:break-word; }
+.import-found {
+  margin-top:0.75rem;
+  display:flex;
+  flex-direction:column;
+  gap:0.5rem;
+  align-items:flex-start;
+  font-size:0.82rem;
+  color:var(--text-primary, var(--text));
+}
+.import-error, .import-warning {
+  margin-top:0.5rem;
+  font-size:0.76rem;
+  line-height:1.5;
+  color:var(--danger, #d9534f);
+}
+.import-progress {
+  margin-top:0.75rem;
+  display:flex;
+  align-items:center;
+  gap:0.6rem;
+  flex-wrap:wrap;
+  font-size:0.8rem;
+  color:var(--text-primary, var(--text));
+}
+.import-bar {
+  flex:1 1 12rem;
+  height:6px;
+  border-radius:999px;
+  background: var(--border-color, var(--border));
+  overflow:hidden;
+}
+.import-fill {
+  height:100%;
+  background: var(--accent, #2ea77a);
+  transition:width 0.3s ease;
 }
 
 .augment-actions {

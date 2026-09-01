@@ -170,6 +170,43 @@ def preview_auto_label(project_name):
     ))
 
 
+@projects_bp.post('/<project_name>/dataset-import/preview')
+def preview_dataset_import(project_name):
+    """
+    What is in an export folder, without copying anything.
+
+    Answering "is this the right folder, and will it come in whole" before
+    moving six thousand files is worth the pass it costs.
+    """
+    from services import datasetimport
+    data = request.get_json(silent=True) or {}
+    projects.get_project(project_name)
+    return ok(datasetimport.preview(data.get('folder')))
+
+
+@projects_bp.post('/<project_name>/dataset-import')
+def start_dataset_import(project_name):
+    """Copy an annotated dataset in, in the background."""
+    from services import datasetimport
+    data = request.get_json(silent=True) or {}
+    return ok({'job': datasetimport.start(project_name, data.get('folder'),
+                                          limit=data.get('limit'))})
+
+
+@projects_bp.get('/<project_name>/dataset-import')
+def dataset_import_status(project_name):
+    from services import datasetimport
+    status = datasetimport.get_status(project_name)
+    return ok({'job': status,
+               'running': bool(status and status.get('status') == 'running')})
+
+
+@projects_bp.post('/<project_name>/dataset-import/cancel')
+def cancel_dataset_import(project_name):
+    from services import datasetimport
+    return ok(datasetimport.cancel(project_name))
+
+
 @projects_bp.get('/<project_name>/review/queue')
 def review_queue(project_name):
     """

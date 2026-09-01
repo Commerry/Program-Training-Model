@@ -99,6 +99,21 @@ export const projectService = {
   cancelAutoLabel: (name) =>
     http.post(`${base(name)}/auto-label/cancel`).then((r) => r.data),
 
+  // ── importing a dataset labelled elsewhere ────────────────────────────
+  // Read from a folder on the machine running the server rather than uploaded:
+  // six thousand pictures is not a browser file picker's job.
+  previewDatasetImport: (name, folder) =>
+    http.post(`${base(name)}/dataset-import/preview`, { folder }).then((r) => r.data),
+
+  startDatasetImport: (name, folder, options = {}) =>
+    http.post(`${base(name)}/dataset-import`, { folder, ...options }).then((r) => r.data),
+
+  datasetImportStatus: (name) =>
+    http.get(`${base(name)}/dataset-import`).then((r) => r.data),
+
+  cancelDatasetImport: (name) =>
+    http.post(`${base(name)}/dataset-import/cancel`).then((r) => r.data),
+
   // ── dataset ───────────────────────────────────────────────────────────
   prepareDataset: (name) =>
     http.post(`${base(name)}/prepare-dataset`).then((r) => r.data),

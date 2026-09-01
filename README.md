@@ -694,6 +694,53 @@ and wrongly, which is the whole failure this path exists to stop.
 Anything set by hand still wins. Recognition fills in what was not stated; it
 never overrules what was.
 
+### Importing a dataset labelled somewhere else
+
+Six thousand pictures already boxed in Custom Vision are worth more than any
+model exported from it. A model is a frozen answer; the pictures and their
+boxes can be trained again, augmented, corrected and extended.
+
+On the project page, give the folder the export was written to and press
+**Check folder**. Nothing is copied until the result looks right:
+
+```
+YOLO — 6311 annotation(s), 6721 box(es), 21 class(es) from label.txt
+```
+
+Three layouts are read:
+
+| | |
+| --- | --- |
+| YOLO | `images/` beside `labels/`, one `.txt` per image of `class cx cy w h` normalised, and a `label.txt` naming the classes — what Custom Vision writes |
+| COCO | one `.json` with images, annotations and categories, boxes in pixels |
+| VOC | one `.xml` per image, boxes as xmin/ymin/xmax/ymax |
+
+The folder is read from the machine running the server rather than uploaded:
+six thousand pictures is not a browser file picker's job, and the export is
+already on disk.
+
+Two things here are wrong in ways nothing complains about, so both are tested
+by recomputing the answer from the source files rather than trusting the
+importer:
+
+**The class order is the export's, never sorted.** A YOLO file says `8`, and
+only `label.txt` knows that 8 is `Good`. That file is not in alphabetical
+order — sorting it would put a different word on every box in the set while
+looking entirely correct.
+
+**A YOLO box is a normalised centre and size in a frame the annotation never
+states.** The pixel dimensions come from the image and nowhere else.
+
+Imported boxes are somebody's work, not a prediction: they are not marked
+auto-labelled and do not enter the review queue, which would otherwise fill
+with thousands of already-correct pictures. Each import is stamped as its own
+batch.
+
+One practical note that cost a debugging pass: the real export lived under a
+folder whose name is not ASCII, and OpenCV on Windows cannot open such a path
+— `cv2.imread` returns `None` with no error. Sizes are read with Pillow and
+the files are copied rather than re-encoded, which is both faster and lossless.
+
 ### Learning from corrections, not from its own answers
 
 A pre-labelled picture that somebody has corrected is worth more than either
