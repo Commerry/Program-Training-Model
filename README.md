@@ -719,6 +719,15 @@ The folder is read from the machine running the server rather than uploaded:
 six thousand pictures is not a browser file picker's job, and the export is
 already on disk.
 
+**Import dataset** takes a zip of the same thing. It used to accept only this
+application's own export and refuse everything else, which is the wrong way
+round — the datasets worth importing are the ones from somewhere else. A zip
+carrying this application's `dataset.json` goes the direct route; any other
+zip is unpacked and read as YOLO, COCO or VOC, including one made by
+right-clicking the folder, where everything sits one level down. Members are
+read one at a time and anything whose path climbs out of the staging folder is
+dropped, because `extractall` will happily write `../../anywhere`.
+
 Two things here are wrong in ways nothing complains about, so both are tested
 by recomputing the answer from the source files rather than trusting the
 importer:

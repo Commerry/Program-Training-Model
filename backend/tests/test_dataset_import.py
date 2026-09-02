@@ -18,6 +18,7 @@ than by trusting the importer's own arithmetic.
 
     python backend/tests/test_dataset_import.py
 """
+import io
 import json
 import os
 import shutil
@@ -228,6 +229,66 @@ check('corners became a position and a size',
       (region.get('tag'), region.get('x'), region.get('y'),
        region.get('width'), region.get('height')) == ('Split', 50.0, 60.0, 200.0, 300.0),
       region)
+
+print('\n== the same export, zipped, through the button that was already there ==')
+# The Import dataset button used to take only this application's own export
+# and refuse everything else, which is the wrong way round: the datasets worth
+# importing are the ones from somewhere else. A user zipped a Custom Vision
+# export, pressed it, and got a 400 saying it had to be a .zip produced by
+# Export -- which it could never be.
+import zipfile                                          # noqa: E402
+
+bundle = TMP / 'export.zip'
+with zipfile.ZipFile(bundle, 'w') as archive:
+    for path in export.rglob('*'):
+        if path.is_file():
+            # Nested under one folder, the way right-clicking a folder zips it.
+            archive.write(path, Path('export') / path.relative_to(export))
+
+r = c.post('/api/projects', json={'name': 'zipped'})
+r = c.post('/api/projects/zipped/import-dataset',
+           data={'file': (bundle.open('rb'), 'export.zip')},
+           content_type='multipart/form-data')
+body = r.get_json() or {}
+check('a zip from another tool is accepted', r.status_code == 200,
+      (r.status_code, body.get('message')))
+check('and read as what it is', (body.get('job') or {}).get('format') == 'yolo',
+      body.get('job'))
+
+with app.app_context():
+    status = datasetimport.wait_for_idle('zipped', timeout=120)
+    zipped = [projects.read_annotation('zipped', e['filename'])
+              for e in projects.list_images('zipped')]
+check('every picture came in', status.get('imported') == 3, status)
+tags = sorted({r['tag'] for rec in zipped for r in (rec.get('regions') or [])})
+check('with the names its label.txt gave them',
+      tags == ['CuffTear', 'DirtM', 'Good'], tags)
+
+print('\n== a zip that is not a zip ==')
+r = c.post('/api/projects/zipped/import-dataset',
+           data={'file': (io.BytesIO(b'not a zip'), 'export.zip')},
+           content_type='multipart/form-data')
+check('is refused rather than crashing', r.status_code == 400,
+      (r.status_code, (r.get_json() or {}).get('message', '')[:80]))
+
+r = c.post('/api/projects/zipped/import-dataset',
+           data={'file': (io.BytesIO(b'x'), 'export.rar')},
+           content_type='multipart/form-data')
+message = (r.get_json() or {}).get('message', '')
+check('and a file that is not a zip says what to do instead',
+      r.status_code == 400 and 'path' in message, message[:120])
+
+print('\n== a zip cannot write outside where it is unpacked ==')
+nasty = TMP / 'nasty.zip'
+with zipfile.ZipFile(nasty, 'w') as archive:
+    archive.writestr('../../escaped.txt', 'no')
+    archive.writestr('images/ok.jpg', b'not an image but a plain member')
+with app.app_context():
+    folder = datasetimport.unpack(nasty, 'zipped')
+check('the climbing member is dropped',
+      not (TMP / 'escaped.txt').exists()
+      and not (Path(folder).parent.parent / 'escaped.txt').exists(),
+      sorted(p.name for p in Path(folder).rglob('*')))
 
 print('\n== a second import is a second batch ==')
 c.post('/api/projects/gloves/dataset-import', json={'folder': str(export)})

@@ -131,6 +131,80 @@ def _class_names(folder):
     return [], None
 
 
+def is_own_export(zip_path):
+    """Is this the zip this application's own Export button writes?"""
+    import zipfile
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            return 'dataset.json' in archive.namelist()
+    except (OSError, zipfile.BadZipFile):
+        raise ProjectError('That file is not a readable .zip')
+
+
+# A zip is trusted no further than its own member names. Everything is written
+# under one staging folder and any member that tries to climb out of it, by a
+# leading slash or a .. segment or an absolute Windows path, is dropped.
+MAX_UNPACKED_BYTES = 40 * 1024 * 1024 * 1024
+MAX_MEMBERS = 200_000
+
+
+def unpack(zip_path, project_name):
+    """
+    Extract a zipped dataset to a staging folder, safely, and return it.
+
+    Read member by member rather than with extractall, because extractall
+    will happily write ../../anywhere. Every path is rebuilt from its parts
+    and anything that is not a plain relative name is skipped rather than
+    sanitised into something else.
+    """
+    import zipfile
+
+    from config import INSTANCE_DIR
+
+    staging = Path(INSTANCE_DIR) / 'dataset-uploads' / projects.safe_filename(project_name)
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    with zipfile.ZipFile(zip_path) as archive:
+        members = archive.infolist()
+        if len(members) > MAX_MEMBERS:
+            raise ProjectError(f'That zip holds {len(members)} entries, which is '
+                               'more than this will unpack.')
+        for member in members:
+            if member.is_dir():
+                continue
+            parts = [p for p in Path(member.filename.replace('\\', '/')).parts
+                     if p not in ('', '.', '..') and ':' not in p]
+            if not parts:
+                continue
+            target = staging.joinpath(*parts)
+            try:
+                target.resolve().relative_to(staging.resolve())
+            except ValueError:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, open(target, 'wb') as out:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > MAX_UNPACKED_BYTES:
+                        shutil.rmtree(staging, ignore_errors=True)
+                        raise ProjectError('That zip unpacks to more than this '
+                                           'will accept.')
+                    out.write(chunk)
+
+    # A zip made by right-clicking a folder holds one folder, and the dataset
+    # is inside it rather than at the top.
+    entries = [p for p in staging.iterdir() if not p.name.startswith('.')]
+    if len(entries) == 1 and entries[0].is_dir():
+        return entries[0]
+    return staging
+
+
 def detect(raw_path):
     """
     What is in this folder, without changing anything.

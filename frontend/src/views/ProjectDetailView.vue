@@ -1272,8 +1272,18 @@ const uploadDataset = async () => {
     showImportDataset.value = false
     selectedDataset.value = null
     if (datasetInput.value) datasetInput.value.value = ''
-    flash(result.message)
-    await refresh()
+    if (result.job) {
+      // A zip from another tool is unpacked and read in the background:
+      // thousands of pictures take minutes, so the answer is a job, not a
+      // count.
+      importJob.value = result.job
+      flash(`Reading ${result.job.total || ''} annotation(s) — ${result.job.format
+        ? result.job.format.toUpperCase() : ''}`)
+      pollDatasetImport()
+    } else {
+      flash(result.message)
+      await refresh()
+    }
   } catch (error) {
     actionError.value = errorMessage(error)
   } finally {

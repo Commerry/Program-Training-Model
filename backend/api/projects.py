@@ -303,17 +303,37 @@ def export_dataset(project_name):
 
 @projects_bp.post('/<project_name>/import-dataset')
 def import_dataset(project_name):
+    """
+    A zipped dataset, whether this application exported it or not.
+
+    It used to take only its own export and refuse everything else, which is
+    the wrong way round: the datasets worth importing are the ones from
+    somewhere else. A zip that carries this application's dataset.json goes
+    the direct route; anything else is unpacked and read as YOLO, COCO or
+    Pascal VOC, the same as a folder would be.
+    """
+    from services import datasetimport
+
     file = request.files.get('file')
     if not file or not file.filename:
         raise ProjectError('No file was uploaded')
     if Path(file.filename).suffix.lower() != '.zip':
-        raise ProjectError('Dataset imports must be a .zip produced by Export')
+        raise ProjectError(
+            f'"{file.filename}" is not a .zip. Zip the export folder and '
+            'upload that, or give its path on this machine instead — a '
+            'folder of six thousand pictures does not need zipping first.')
 
+    projects.get_project(project_name)
     with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as tmp:
         temp_path = Path(tmp.name)
     try:
         file.save(str(temp_path))
-        return ok(dataset.import_dataset(project_name, temp_path))
+        if datasetimport.is_own_export(temp_path):
+            return ok(dataset.import_dataset(project_name, temp_path))
+        # Unpacked to a staging folder the background reader can work from:
+        # thousands of images take minutes, and the request would time out.
+        folder = datasetimport.unpack(temp_path, project_name)
+        return ok({'job': datasetimport.start(project_name, folder)})
     finally:
         temp_path.unlink(missing_ok=True)
 
