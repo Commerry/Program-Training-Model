@@ -29,6 +29,93 @@ Train-Model-Webapp-main/
     └── instance/         SQLite database and the generated secret key
 ```
 
+## Setting up a new machine, start to finish
+
+Everything below in order, for a Windows machine that has nothing on it yet.
+The individual pieces are explained in the sections that follow; this is the
+sequence to work through when standing at a new installation.
+
+**1. Install what it needs.** Python 3.10+ from
+[python.org](https://www.python.org/downloads/windows/) — tick **Add python.exe
+to PATH** — Node 18+ from [nodejs.org](https://nodejs.org/), and
+[Git](https://git-scm.com/download/win). Close and reopen PowerShell afterwards
+so the new PATH is picked up.
+
+```powershell
+python --version; node --version; git --version
+```
+
+**2. Get the code and its dependencies.**
+
+```powershell
+git clone https://github.com/Commerry/Program-Training-Model.git
+cd Program-Training-Model
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\start.ps1 -Install
+```
+
+Close the two windows it opens; there is more to do before a real run.
+
+**3. Replace the CPU-only PyTorch.** This step is not optional on a machine
+that will train. `requirements.txt` installs a CPU build, and training with it
+still works, still reports a falling loss, and takes tens of hours instead of
+one — with nothing on screen to say why.
+
+```powershell
+python -m pip uninstall -y torch torchvision
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+```
+
+**4. Check it before trusting it.**
+
+```powershell
+python backend\scripts\doctor.py
+```
+
+It must report CUDA and name the card. If it reports a GPU PyTorch cannot use,
+the index URL in step 3 does not match the driver — `cu121`, `cu124` and
+`cu126` are the usual ones, and <https://pytorch.org/get-started/locally/> says
+which.
+
+**5. Set the password and the ports.**
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Set `ADMIN_PASSWORD` to something real. The default `admin` / `admin123` is
+fine on a laptop nobody else can reach and is not fine on a factory network.
+
+**6. Allow it through the firewall,** in a PowerShell opened with **Run as
+administrator**. Without this another machine gets `ERR_CONNECTION_REFUSED`
+while the server sits there working perfectly.
+
+```powershell
+cd C:\path	o\Program-Training-Model
+.\start.ps1 -Firewall
+```
+
+**7. Start it.** `-Network` builds the interface and serves it from the backend
+on one port, then prints the addresses to open from other machines.
+
+```powershell
+.\start.ps1 -Network
+```
+
+**8. Confirm the installation is sound** — worth the seven minutes on a machine
+that is about to be left running:
+
+```powershell
+python backend	estsun_all.py
+```
+
+**Later, to update:**
+
+```powershell
+cd C:\path	o\Program-Training-Model; git pull; .\start.ps1 -Network
+```
+
 ## Installing on another machine
 
 Needs **Python 3.10+** and **Node 18+**. Everything else the installer handles.
