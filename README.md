@@ -103,11 +103,32 @@ on one port, then prints the addresses to open from other machines.
 .\start.ps1 -Network
 ```
 
+**7b. If npm cannot reach its registry.** On a restricted network `npm
+install` resolves every version and then times out fetching the files:
+
+```
+npm http fetch GET https://registry.npmjs.org/@vue/runtime-dom/-/runtime-dom-3.5.41.tgz attempt 3 failed with ETIMEDOUT
+```
+
+Node is not needed to run this. The backend serves `frontend/dist` itself, so
+a build copied from a machine that can reach the registry is a complete
+installation. On that machine:
+
+```powershell
+cd frontend; npm run build
+Compress-Archive -Path dist -DestinationPath dist.zip -Force
+```
+
+Copy `dist.zip` across, extract it to `frontend\dist`, and start normally.
+`-Network` uses an existing build when it cannot make one, and says so rather
+than failing.
+
 **8. Confirm the installation is sound** — worth the seven minutes on a machine
 that is about to be left running:
 
 ```powershell
-python backend	estsun_all.py
+python backend	ests
+un_all.py
 ```
 
 **Later, to update:**

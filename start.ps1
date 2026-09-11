@@ -187,10 +187,33 @@ if ($Install) {
 
 # ── Network mode: one port, built UI served by the backend ──────────────────
 if ($Network) {
-    Write-Host 'Building the frontend...' -ForegroundColor Cyan
-    Push-Location (Join-Path $root 'frontend')
-    npm run build
-    Pop-Location
+    # Build only if there is something to build with. On a restricted network
+    # npm resolves versions and then times out fetching every tarball, which
+    # leaves node_modules present but unusable -- and the backend does not need
+    # Node at all: it serves frontend/dist directly. A dist copied from
+    # another machine is a complete installation on its own.
+    $dist = Join-Path $root 'frontend\dist'
+    $modules = Join-Path $root 'frontend\node_modules\vite'
+    $canBuild = (Test-Command 'npm') -and (Test-Path $modules)
+
+    if ($canBuild) {
+        Write-Host 'Building the frontend...' -ForegroundColor Cyan
+        Push-Location (Join-Path $root 'frontend')
+        npm run build
+        Pop-Location
+    } elseif (Test-Path (Join-Path $dist 'index.html')) {
+        Write-Host 'Using the existing build in frontend/dist.' -ForegroundColor DarkGray
+        if (-not (Test-Path $modules)) {
+            Write-Host 'npm install has not completed here, so nothing was rebuilt.' -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host 'There is no built interface to serve.' -ForegroundColor Red
+        Write-Host 'Either finish the install on this machine:' -ForegroundColor Yellow
+        Write-Host '    cd frontend; npm install; npm run build'
+        Write-Host 'or build it on a machine that can reach the npm registry and' -ForegroundColor Yellow
+        Write-Host "copy frontend\dist into $root\frontend\." -ForegroundColor Yellow
+        exit 1
+    }
 
     $env:BACKEND_HOST = '0.0.0.0'
     $addresses = @(Get-LocalIPv4)

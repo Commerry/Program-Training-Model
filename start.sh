@@ -200,13 +200,22 @@ fi
 # ── Network mode: one port, built UI served by the backend ──────────────────
 if [[ $DO_NETWORK -eq 1 ]]; then
     if [[ ! -d "$ROOT/frontend/dist" ]] || [[ -n "$(find "$ROOT/frontend/src" -newer "$ROOT/frontend/dist" -print -quit 2>/dev/null)" ]]; then
-        if ! have npm; then
-            echo "The UI has not been built and npm is not installed." >&2
-            echo "Install Node 18+ and run:  cd frontend && npm install && npm run build" >&2
-            exit 1
-        fi
+        # node_modules matters as much as npm itself. On a restricted network
+        # npm resolves versions and then times out fetching every tarball,
+        # leaving the directory present but unusable.
+        if ! have npm || [[ ! -d "$ROOT/frontend/node_modules/vite" ]]; then
+            if [[ -f "$ROOT/frontend/dist/index.html" ]]; then
+                echo "Using the existing build in frontend/dist; it was not rebuilt." >&2
+            else
+                echo "The UI has not been built and npm cannot build it here." >&2
+                echo "Either:  cd frontend && npm install && npm run build" >&2
+                echo "or build it elsewhere and copy frontend/dist over." >&2
+                exit 1
+            fi
+        else
         echo "Building the frontend..."
         (cd "$ROOT/frontend" && npm run build)
+        fi
     else
         echo "Using the existing build in frontend/dist."
     fi
