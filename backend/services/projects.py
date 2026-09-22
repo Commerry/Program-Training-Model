@@ -266,7 +266,7 @@ def delete_project(name):
 # outside the app without changing those counts are picked up by
 # rebuild_index(), which the training and dataset paths always call.
 
-INDEX_VERSION = 4
+INDEX_VERSION = 5   # entries now carry original_name and synthetic
 
 # A thumbnail a few hundred pixels wide cannot usefully show more outlines than
 # this, and an image with hundreds of boxes would otherwise dominate the index.
@@ -367,6 +367,13 @@ def _entry_from_annotation(filename, ann, size_kb=None):
         # what they are.
         'batch': ann.get('batch'),
         'imported_at': ann.get('imported_at'),
+        # What the file was called before it was stored under a timestamp, and
+        # -- for an image a defect was synthesised onto -- the good glove it
+        # was made from. Both are the same field because they mean the same
+        # thing: where this picture came from. The studio pairs each result
+        # with its original from this, without a request per picture.
+        'original_name': ann.get('original_name'),
+        'synthetic': bool(ann.get('synthetic')),
         'size_kb': size_kb,
     }
 

@@ -1,8 +1,10 @@
 <template>
   <div class="studio">
+    <!-- ── hero ───────────────────────────────────────────────────────── -->
     <header class="hero">
+      <div class="hero-mark"><Icon name="layers" size="md" /></div>
       <div class="hero-text">
-        <h1><Icon name="layers" size="md" /> Defect Studio</h1>
+        <h1>Defect Studio</h1>
         <p>
           A mono camera turns glove colour into one grey level, so a model
           trained on one colour is useless on another and every line needs its
@@ -11,28 +13,96 @@
           its grey, boxed from what is actually visible afterwards.
         </p>
       </div>
-      <div class="hero-flow">
-        <span :class="['flow-step', { done: tags.length }]">Defects</span>
-        <span class="flow-arrow" aria-hidden="true">&rarr;</span>
-        <span :class="['flow-step', { done: goodImages.length }]">Good gloves</span>
-        <span class="flow-arrow" aria-hidden="true">&rarr;</span>
-        <span :class="['flow-step', { done: results.length }]">Ready to train</span>
-      </div>
+      <ol class="flow">
+        <li :class="{ done: goodImages.length }">
+          <b>{{ goodImages.length || '–' }}</b><span>good gloves</span>
+        </li>
+        <li :class="{ done: tags.length }">
+          <b>{{ tags.length || '–' }}</b><span>defects</span>
+        </li>
+        <li :class="{ done: results.length }">
+          <b>{{ results.length || '–' }}</b><span>made</span>
+        </li>
+      </ol>
     </header>
 
-    <div v-if="error" class="banner error">{{ error }}</div>
+    <div v-if="error" class="banner">{{ error }}</div>
 
-    <div class="columns">
-      <!-- ── 1. the defects ─────────────────────────────────────────── -->
-      <section class="card">
-        <div class="card-head">
-          <span class="num">1</span>
-          <h2>Defects to use</h2>
-          <span v-if="tags.length" class="pill">{{ tags.length }} selected</span>
+    <!-- ── bring the pictures in; first thing on the page ─────────────── -->
+    <section class="card drop-card">
+      <div
+        :class="['drop', { over: dragging, busy: uploading }]"
+        @dragover.prevent="dragging = true"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
+        @click="uploading ? null : fileInput?.click()"
+      >
+        <input ref="fileInput" type="file" accept="image/*" multiple
+               class="hidden-input" @change="onPick" />
+        <div class="drop-ring"><Icon name="upload" size="md" /></div>
+        <template v-if="!uploading">
+          <h2>Drop this line's good gloves here</h2>
+          <p>
+            Straight off the camera, no boxes needed. Click to browse, or drag
+            a folder's worth in.
+            <template v-if="!targetName">
+              Somewhere to keep them is made automatically — this is not tied
+              to training and nothing has to be prepared first.
+            </template>
+          </p>
+        </template>
+        <template v-else>
+          <h2>Adding {{ uploadCount }} image(s)…</h2>
+          <div class="upload-bar"><div :style="{ width: uploadPercent + '%' }"></div></div>
+        </template>
+      </div>
+
+      <div class="drop-foot">
+        <label class="inline-field">
+          <span>Kept in</span>
+          <select v-model="targetName" class="control" @change="onTargetChange">
+            <option :value="''">a new project</option>
+            <option v-for="p in projects" :key="p.name" :value="p.name">
+              {{ p.name }} — {{ p.total_images || 0 }} images
+            </option>
+            <option value="__new__">＋ name a new one…</option>
+          </select>
+        </label>
+        <div v-if="makingNew" class="new-project">
+          <input v-model="newName" class="control"
+                 placeholder="e.g. black-line-2" @keyup.enter="createTarget" />
+          <button class="btn btn-secondary" :disabled="!newName.trim() || creating"
+                  @click="createTarget">
+            {{ creating ? 'Creating…' : 'Create' }}
+          </button>
         </div>
+        <span v-if="goodImages.length" class="count-note">
+          <b>{{ goodImages.length }}</b> unlabelled image(s) ready. Anything
+          already boxed is left alone.
+        </span>
+      </div>
 
-        <label class="field">
-          <span>From project</span>
+      <div v-if="goodImages.length" class="strip">
+        <figure v-for="img in goodImages.slice(0, 14)" :key="img.filename">
+          <img :src="imageUrl(targetName, img.filename)" :alt="img.filename"
+               loading="lazy" />
+        </figure>
+        <div v-if="goodImages.length > 14" class="more">
+          +{{ goodImages.length - 14 }}
+        </div>
+      </div>
+    </section>
+
+    <!-- ── the defects ────────────────────────────────────────────────── -->
+    <section class="card">
+      <div class="card-head">
+        <h2>Defects to put on them</h2>
+        <span v-if="tags.length" class="pill">{{ tags.length }} chosen</span>
+      </div>
+
+      <div class="source-row">
+        <label class="inline-field grow">
+          <span>Collected from</span>
           <select v-model="sourceName" class="control" @change="loadLibrary">
             <option :value="''">Choose a labelled project…</option>
             <option v-for="p in projects" :key="p.name" :value="p.name">
@@ -40,132 +110,65 @@
             </option>
           </select>
         </label>
-
-        <button class="btn btn-secondary wide" :disabled="!sourceName || collecting"
+        <button class="btn btn-secondary" :disabled="!sourceName || collecting"
                 @click="collect">
           <Icon name="download" size="sm" />
           <span>{{ collecting ? 'Reading signatures…' : 'Collect defects' }}</span>
         </button>
+      </div>
 
-        <p v-if="library && !library.total" class="note">
-          Nothing collected yet. This reads the optical density each box added
-          to the rubber it was on — the part that survives being moved to
-          another colour.
-        </p>
+      <p v-if="!library" class="hint">
+        Pick the colour you have been running longest — the one whose defects
+        are already drawn. Collecting reads the optical density each box added
+        to the rubber it was on, which is the part that survives being moved to
+        another colour.
+      </p>
+      <p v-else-if="!library.total" class="hint">
+        Nothing collected from that project yet. Press <b>Collect defects</b>.
+      </p>
 
-        <div v-if="library && library.total" class="chips">
+      <template v-if="library && library.total">
+        <div class="chips">
           <button v-for="row in library.per_tag" :key="row.tag"
                   :class="['chip', row.defect_class, { on: tags.includes(row.tag) }]"
                   @click="toggleTag(row.tag)">
+            <i class="dot"></i>
             <span class="chip-name">{{ row.tag }}</span>
             <span class="chip-count">{{ row.count }}</span>
-            <span class="chip-kind">{{ row.defect_class }}</span>
           </button>
         </div>
-        <p v-if="library && library.total" class="note tiny">
-          The kind decides the physics: <strong>hole</strong> and
-          <strong>tear</strong> let the backlight through, so they land at the
-          same brightness on every colour. The rest add optical density, so
-          they land at the same <em>density</em> and a different grey.
-        </p>
-      </section>
-
-      <!-- ── 2. the good gloves ─────────────────────────────────────── -->
-      <section class="card">
-        <div class="card-head">
-          <span class="num">2</span>
-          <h2>This line's good gloves</h2>
-          <span v-if="goodImages.length" class="pill">{{ goodImages.length }} ready</span>
+        <div class="legend">
+          <span><i class="dot hole"></i> light through — the same brightness on
+            every colour</span>
+          <span><i class="dot stain"></i> more or less rubber — the same
+            <em>density</em>, a different grey</span>
         </div>
+      </template>
+    </section>
 
-<!--
-          This has nothing to do with training and is not tied to it. A project
-          is only where the pictures and their boxes are kept, so needing one
-          that already exists is friction for no reason: name a new one and it
-          is made here.
-        -->
-        <label class="field">
-          <span>Keep them in</span>
-          <select v-model="targetName" class="control" @change="onTargetChange">
-            <option :value="''">Choose a project…</option>
-            <option v-for="p in projects" :key="p.name" :value="p.name">
-              {{ p.name }} — {{ p.total_images || 0 }} images
-            </option>
-            <option value="__new__">＋ Start a new one…</option>
-          </select>
-        </label>
-
-        <div v-if="makingNew" class="step-row new-project">
-          <input v-model="newName" class="control" placeholder="Name for this line, e.g. black-line-2"
-                 @keyup.enter="createTarget" />
-          <button class="btn btn-secondary" :disabled="!newName.trim() || creating"
-                  @click="createTarget">
-            <Icon name="plus" size="sm" />
-            <span>{{ creating ? 'Creating…' : 'Create' }}</span>
-          </button>
-        </div>
-
-        <div v-if="targetName"
-             :class="['drop', { over: dragging, busy: uploading }]"
-             @dragover.prevent="dragging = true"
-             @dragleave.prevent="dragging = false"
-             @drop.prevent="onDrop">
-          <input ref="fileInput" type="file" accept="image/*" multiple
-                 class="hidden-input" @change="onPick" />
-          <Icon name="upload" size="md" />
-          <p v-if="!uploading">
-            Drop good glove photographs here, or
-            <button class="link" @click="fileInput?.click()">browse</button>
-          </p>
-          <p v-else>Uploading… {{ uploadPercent }}%</p>
-          <span class="note tiny">
-            Only images with no boxes are used — anything already labelled is
-            left alone.
-          </span>
-        </div>
-
-        <div v-if="goodImages.length" class="strip">
-          <figure v-for="img in goodImages.slice(0, 12)" :key="img.filename">
-            <img :src="imageUrl(targetName, img.filename)" :alt="img.filename" />
-          </figure>
-          <div v-if="goodImages.length > 12" class="more">
-            +{{ goodImages.length - 12 }}
-          </div>
-        </div>
-        <p v-else-if="targetName" class="note">
-          No unlabelled images in that project yet. Add this line's good gloves
-          above.
-        </p>
-      </section>
-    </div>
-
-    <!-- ── 3. run ───────────────────────────────────────────────────── -->
+    <!-- ── run ────────────────────────────────────────────────────────── -->
     <section class="card run-card">
-      <div class="card-head">
-        <span class="num">3</span>
-        <h2>Add the defects</h2>
-        <label class="inline-field">
-          <span>per image</span>
-          <input v-model.number="perImage" type="number" min="1" max="4"
-                 class="control tiny-control" />
-        </label>
-      </div>
-
       <div class="run-row">
-        <button v-if="!running" class="btn btn-primary" :disabled="!canRun"
+        <button v-if="!running" class="btn btn-primary big" :disabled="!canRun"
                 @click="run">
           <Icon name="zap" size="sm" />
           <span>Add defects to {{ goodImages.length }} image(s)</span>
         </button>
-        <button v-else class="btn btn-danger" @click="stop">
+        <button v-else class="btn btn-danger big" @click="stop">
           <Icon name="x" size="sm" />
           <span>Stop</span>
         </button>
-<!--
-          Both offered, neither required. The pictures are a dataset in their
-          own right: they can be trained here, or downloaded and taken to
-          whatever the line actually runs.
-        -->
+
+        <label class="inline-field">
+          <span>per image</span>
+          <input v-model.number="perImage" type="number" min="1" max="4"
+                 class="control narrow" />
+        </label>
+
+        <span v-if="!canRun && !running" class="hint inline">{{ whyNotReady }}</span>
+
+        <div class="run-spacer"></div>
+
         <button v-if="results.length" class="btn btn-secondary"
                 :disabled="downloading" @click="download">
           <Icon name="download" size="sm" />
@@ -177,9 +180,6 @@
           <Icon name="rocket" size="sm" />
           <span>Train on this</span>
         </router-link>
-        <span v-if="!canRun && !running" class="note tiny">
-          {{ whyNotReady }}
-        </span>
       </div>
 
       <div v-if="job" class="job">
@@ -188,47 +188,54 @@
           <div class="job-fill" :style="{ width: percent + '%' }"></div>
         </div>
         <dl v-if="job.profile" class="measured">
-          <div><dt>Glove</dt><dd>{{ Math.round(job.profile.glove_level) }}</dd></div>
-          <div><dt>Backlight</dt><dd>{{ Math.round(job.profile.bg_level) }}</dd></div>
+          <div>
+            <dt>Glove</dt><dd>{{ Math.round(job.profile.glove_level) }}</dd>
+            <i class="swatch" :style="swatch(job.profile.glove_level)"></i>
+          </div>
+          <div>
+            <dt>Backlight</dt><dd>{{ Math.round(job.profile.bg_level) }}</dd>
+            <i class="swatch" :style="swatch(job.profile.bg_level)"></i>
+          </div>
           <div><dt>Noise</dt><dd>{{ job.profile.noise_sigma }}</dd></div>
           <div class="good"><dt>Made</dt><dd>{{ job.made || 0 }}</dd></div>
           <div :class="{ warn: job.refused }">
             <dt>Refused</dt><dd>{{ job.refused || 0 }}</dd>
           </div>
         </dl>
-        <p v-if="job.refused" class="note tiny">
-          Refused means too faint to see against this colour's own noise.
-          Thrown out rather than written in: a defect nobody can see teaches
+        <p v-if="job.refused" class="hint">
+          Refused means too faint to see against this colour's own noise —
+          thrown out rather than written in. A defect nobody can see teaches
           the detector that ordinary rubber is a tear.
         </p>
       </div>
     </section>
 
-    <!-- ── results ──────────────────────────────────────────────────── -->
+    <!-- ── results ────────────────────────────────────────────────────── -->
     <section v-if="results.length" class="card">
       <div class="card-head">
-        <span class="num"><Icon name="check" size="sm" /></span>
-        <h2>Made, and boxed</h2>
+        <h2>Made, and already boxed</h2>
         <span class="pill">{{ results.length }}</span>
       </div>
-      <p class="note">
-        The boxes come from what changed by more than this line's own noise, so
-        the same defect is boxed smaller on a darker glove. Nothing to draw by
-        hand.
+      <p class="hint">
+        Click any of them to see the good glove it was made from, side by side.
+        The box comes from what changed by more than this line's own noise, so
+        the same defect is boxed smaller on a darker glove.
       </p>
 
       <div class="gallery">
         <figure v-for="img in results" :key="img.filename" class="shot"
                 @click="preview = img">
-          <div class="shot-frame">
-            <img :src="imageUrl(targetName, img.filename)" :alt="img.filename" />
-            <svg v-if="img.width && img.height" class="overlay"
+          <div class="frame">
+            <img :src="imageUrl(targetName, img.filename)" :alt="img.filename"
+                 loading="lazy" />
+            <svg v-if="img.width" class="overlay"
                  :viewBox="`0 0 ${img.width} ${img.height}`"
                  preserveAspectRatio="none">
               <rect v-for="(box, i) in img.boxes || []" :key="i"
                     :x="box[0]" :y="box[1]" :width="box[2]" :height="box[3]"
                     class="box" />
             </svg>
+            <span class="zoom"><Icon name="search" size="sm" /></span>
           </div>
           <figcaption>
             <span v-for="tag in tagsOf(img)" :key="tag" class="tag">{{ tag }}</span>
@@ -237,18 +244,31 @@
       </div>
     </section>
 
-    <!-- a closer look -->
+    <!-- ── before and after ───────────────────────────────────────────── -->
     <div v-if="preview" class="lightbox" @click="preview = null">
       <div class="lightbox-inner" @click.stop>
-        <div class="shot-frame big">
-          <img :src="imageUrl(targetName, preview.filename)" :alt="preview.filename" />
-          <svg v-if="preview.width" class="overlay"
-               :viewBox="`0 0 ${preview.width} ${preview.height}`"
-               preserveAspectRatio="none">
-            <rect v-for="(box, i) in preview.boxes || []" :key="i"
-                  :x="box[0]" :y="box[1]" :width="box[2]" :height="box[3]"
-                  class="box" />
-          </svg>
+        <div class="compare">
+          <figure>
+            <figcaption>Good glove, as it came off the line</figcaption>
+            <div class="frame">
+              <img v-if="preview.original_name"
+                   :src="imageUrl(targetName, preview.original_name)" alt="before" />
+              <p v-else class="missing">The original is not in this project.</p>
+            </div>
+          </figure>
+          <figure>
+            <figcaption>With the defect, and its box</figcaption>
+            <div class="frame">
+              <img :src="imageUrl(targetName, preview.filename)" alt="after" />
+              <svg v-if="preview.width" class="overlay"
+                   :viewBox="`0 0 ${preview.width} ${preview.height}`"
+                   preserveAspectRatio="none">
+                <rect v-for="(box, i) in preview.boxes || []" :key="i"
+                      :x="box[0]" :y="box[1]" :width="box[2]" :height="box[3]"
+                      class="box" />
+              </svg>
+            </div>
+          </figure>
         </div>
         <div class="lightbox-bar">
           <span v-for="tag in tagsOf(preview)" :key="tag" class="tag">{{ tag }}</span>
@@ -277,6 +297,7 @@ const error = ref('')
 const collecting = ref(false)
 const uploading = ref(false)
 const uploadPercent = ref(0)
+const uploadCount = ref(0)
 const dragging = ref(false)
 const preview = ref(null)
 const fileInput = ref(null)
@@ -292,11 +313,9 @@ const percent = computed(() => {
   if (!job.value?.total) return 0
   return Math.round(((job.value.done || 0) / job.value.total) * 100)
 })
-
 const whyNotReady = computed(() => {
-  if (!tags.value.length) return 'Collect some defects and tick the ones to use.'
-  if (!targetName.value) return 'Choose the project for this line.'
-  if (!goodImages.value.length) return 'Add this line\'s good gloves.'
+  if (!goodImages.value.length) return 'Add this line\'s good gloves above.'
+  if (!tags.value.length) return 'Collect some defects and choose which to use.'
   return ''
 })
 
@@ -304,13 +323,24 @@ const imageUrl = (project, filename) =>
   `/api/projects/${encodeURIComponent(project)}/images/${encodeURIComponent(filename)}/raw`
 
 // The index already carries every image's boxes, so the gallery draws them
-// from the one request it has rather than asking per picture.
+// from the one request it makes rather than asking per picture.
 const tagsOf = (img) => [...new Set((img.boxes || []).map((b) => b[4]))]
+
+// The measured glove and backlight levels are greys, and showing them as greys
+// says more at a glance than the number does.
+const swatch = (level) => {
+  const v = Math.max(0, Math.min(255, Math.round(level || 0)))
+  return { background: `rgb(${v},${v},${v})` }
+}
 
 const toggleTag = (tag) => {
   const at = tags.value.indexOf(tag)
   if (at === -1) tags.value.push(tag)
   else tags.value.splice(at, 1)
+}
+
+const refreshProjects = async () => {
+  projects.value = (await projectService.list()).projects || []
 }
 
 const loadLibrary = async () => {
@@ -332,7 +362,7 @@ const collect = async () => {
   try {
     library.value = await projectService.collectDefectLibrary(sourceName.value,
                                                               { per_label: 40 })
-    // Everything ticked to start with: unticking a few beats hunting for them.
+    // Everything chosen to start with: unticking a few beats hunting for them.
     tags.value = (library.value.per_tag || []).map((row) => row.tag)
   } catch (err) {
     error.value = errorMessage(err, 'Those defects could not be collected')
@@ -358,7 +388,7 @@ const createTarget = async () => {
   error.value = ''
   try {
     await projectService.create(name)
-    projects.value = (await projectService.list()).projects || []
+    await refreshProjects()
     targetName.value = name
     makingNew.value = false
     newName.value = ''
@@ -370,24 +400,28 @@ const createTarget = async () => {
   }
 }
 
-const download = async () => {
-  if (!targetName.value || downloading.value) return
-  downloading.value = true
-  try {
-    const blob = await projectService.exportDataset(targetName.value)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${targetName.value}-with-defects.zip`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-  } catch (err) {
-    error.value = errorMessage(err, 'The dataset could not be packed')
-  } finally {
-    downloading.value = false
-  }
+/**
+ * Somewhere to put the pictures, without being asked for one first.
+ *
+ * Requiring a project to exist before a file can be dropped is friction for no
+ * reason: a project is only where the images and their boxes are kept, and
+ * this has nothing to do with training. Dropping files with none chosen makes
+ * one, named after the day, and the picker then shows which.
+ */
+const ensureTarget = async () => {
+  if (targetName.value) return targetName.value
+  const now = new Date()
+  const stamp = `${now.getFullYear()}`
+    + `${String(now.getMonth() + 1).padStart(2, '0')}`
+    + `${String(now.getDate()).padStart(2, '0')}`
+  let name = `defect-studio-${stamp}`
+  let suffix = 2
+  const taken = new Set(projects.value.map((p) => p.name))
+  while (taken.has(name)) name = `defect-studio-${stamp}-${suffix++}`
+  await projectService.create(name)
+  await refreshProjects()
+  targetName.value = name
+  return name
 }
 
 const loadTarget = async () => {
@@ -410,7 +444,6 @@ const refreshImages = async () => {
   const { images } = await projectService.images(targetName.value)
   const all = images || []
   goodImages.value = all.filter((i) => !i.annotated && !i.augmented)
-  // What this run produced: the batch it stamped, still boxed.
   const batch = job.value?.batch
   results.value = batch
     ? all.filter((i) => i.batch === batch && i.annotated)
@@ -419,12 +452,14 @@ const refreshImages = async () => {
 
 const upload = async (files) => {
   const picked = Array.from(files || []).filter((f) => f.type.startsWith('image/'))
-  if (!picked.length || !targetName.value) return
+  if (!picked.length) return
   uploading.value = true
+  uploadCount.value = picked.length
   uploadPercent.value = 0
   error.value = ''
   try {
-    await projectService.uploadImages(targetName.value, picked,
+    const into = await ensureTarget()
+    await projectService.uploadImages(into, picked,
                                       (p) => { uploadPercent.value = p })
     await refreshImages()
   } catch (err) {
@@ -467,6 +502,26 @@ const stop = async () => {
   }
 }
 
+const download = async () => {
+  if (!targetName.value || downloading.value) return
+  downloading.value = true
+  try {
+    const blob = await projectService.exportDataset(targetName.value)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${targetName.value}-with-defects.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    error.value = errorMessage(err, 'The dataset could not be packed')
+  } finally {
+    downloading.value = false
+  }
+}
+
 let timer = null
 const poll = () => {
   clearTimeout(timer)
@@ -484,7 +539,7 @@ const poll = () => {
 
 onMounted(async () => {
   try {
-    projects.value = (await projectService.list()).projects || []
+    await refreshProjects()
   } catch (err) {
     error.value = errorMessage(err, 'The projects could not be listed')
   }
@@ -494,237 +549,279 @@ onBeforeUnmount(() => clearTimeout(timer))
 </script>
 
 <style scoped>
-.studio { padding: 1.5rem; max-width: 76rem; }
+.studio { padding: 1.5rem; max-width: 78rem; }
 
 /* ── hero ─────────────────────────────────────────────────────────── */
 .hero {
   display: flex;
-  justify-content: space-between;
-  gap: 1.5rem;
+  gap: 1.1rem;
   align-items: flex-start;
   flex-wrap: wrap;
-  padding: 1.25rem 1.4rem;
-  margin-bottom: 1.2rem;
-  border-radius: 16px;
+  padding: 1.3rem 1.5rem;
+  margin-bottom: 1.1rem;
+  border-radius: var(--radius-xl, 18px);
   border: 1px solid var(--border-color, var(--border));
   background:
-    radial-gradient(120% 140% at 0% 0%,
-      var(--accent-softer, rgba(46, 167, 122, 0.16)), transparent 60%),
-    var(--bg-subtle);
+    radial-gradient(90% 180% at 0% 0%, var(--accent-softer), transparent 55%),
+    var(--surface, var(--bg-subtle));
 }
+.hero-mark {
+  display: grid;
+  place-items: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  flex: none;
+  border-radius: 14px;
+  color: #fff;
+  background: var(--grad-accent, var(--accent));
+  box-shadow: var(--shadow-accent, none);
+}
+.hero-text { flex: 1 1 24rem; }
 .hero-text h1 {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.35rem;
   font-size: 1.35rem;
   color: var(--text-primary, var(--text));
 }
 .hero-text p {
   margin: 0;
-  max-width: 46rem;
+  max-width: 48rem;
   font-size: 0.82rem;
   line-height: 1.65;
   color: var(--text-tertiary, var(--text-3));
 }
-.hero-flow {
+.flow { display: flex; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.flow li {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.45rem;
+  min-width: 5.2rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, var(--border));
+  background: var(--bg);
+}
+.flow b {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
   color: var(--text-tertiary, var(--text-3));
 }
-.flow-arrow { opacity: 0.5; font-size: 0.85rem; }
-.flow-step {
-  padding: 0.3rem 0.65rem;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  border: 1px solid var(--border-color, var(--border));
+.flow span {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary, var(--text-3));
 }
-.flow-step.done {
-  color: var(--accent, #2ea77a);
-  border-color: var(--accent, #2ea77a);
-  background: var(--accent-softer, rgba(46, 167, 122, 0.12));
-}
+.flow li.done { border-color: var(--accent); background: var(--accent-softer); }
+.flow li.done b { color: var(--accent); }
 
 .banner {
   margin-bottom: 1rem;
   padding: 0.65rem 0.85rem;
   border-radius: 10px;
   font-size: 0.82rem;
-}
-.banner.error {
-  color: var(--danger, #d9534f);
-  border: 1px solid var(--danger, #d9534f);
+  color: var(--danger);
+  border: 1px solid var(--danger);
 }
 
 /* ── cards ────────────────────────────────────────────────────────── */
-.columns {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(23rem, 1fr));
-  gap: 1rem;
-}
 .card {
-  padding: 1.1rem;
+  padding: 1.15rem;
   margin-bottom: 1rem;
   border: 1px solid var(--border-color, var(--border));
-  border-radius: 16px;
-  background: var(--bg-subtle);
+  border-radius: var(--radius-xl, 18px);
+  background: var(--surface, var(--bg-subtle));
 }
 .card-head {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.6rem;
 }
 .card-head h2 {
   margin: 0;
   font-size: 1rem;
   color: var(--text-primary, var(--text));
 }
-.num {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.65rem;
-  height: 1.65rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  background: var(--accent-softer, rgba(46, 167, 122, 0.15));
-  color: var(--accent, #2ea77a);
-}
 .pill {
-  margin-left: auto;
-  padding: 0.2rem 0.55rem;
+  padding: 0.18rem 0.55rem;
   border-radius: 999px;
   font-size: 0.7rem;
-  font-weight: 600;
-  background: var(--accent-softer, rgba(46, 167, 122, 0.12));
-  color: var(--accent, #2ea77a);
+  font-weight: 700;
+  background: var(--accent-softer);
+  color: var(--accent);
 }
 
-.field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.7rem; }
-.field > span, .inline-field > span {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-tertiary, var(--text-3));
-}
-.inline-field {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.control {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border-color, var(--border));
-  border-radius: 10px;
-  padding: 0.5rem 0.7rem;
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: var(--text-primary, var(--text));
-}
-.tiny-control { width: 4rem; padding: 0.35rem 0.5rem; }
-.wide { width: 100%; justify-content: center; }
-
-.note {
-  margin: 0.6rem 0 0;
-  font-size: 0.78rem;
-  line-height: 1.55;
-  color: var(--text-tertiary, var(--text-3));
-}
-.note.tiny { font-size: 0.72rem; }
-
-/* ── defect chips ─────────────────────────────────────────────────── */
-.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.8rem; }
-.chip {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid var(--border-color, var(--border));
-  background: var(--bg);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.76rem;
-  color: var(--text-tertiary, var(--text-3));
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.chip-name { font-weight: 600; }
-.chip-count { opacity: 0.75; }
-.chip-kind { font-size: 0.66rem; opacity: 0.6; }
-.chip.on {
-  color: var(--text-primary, var(--text));
-  border-color: var(--accent, #2ea77a);
-  background: var(--accent-softer, rgba(46, 167, 122, 0.12));
-}
-/* The physics, at a glance: light through, or more/less rubber. */
-.chip.on.hole, .chip.on.tear { border-color: #e0a63c; }
-.chip.on.thin, .chip.on.thick { border-color: #6aa8e0; }
-
-/* ── drop zone ────────────────────────────────────────────────────── */
+/* ── the drop zone, which is the point of the page ────────────────── */
+.drop-card { padding: 0.9rem; }
 .drop {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
-  padding: 1.2rem 1rem;
-  border: 1.5px dashed var(--border-color, var(--border));
-  border-radius: 14px;
+  padding: 2.2rem 1.5rem;
+  border: 2px dashed var(--border-strong, var(--border));
+  border-radius: 16px;
   text-align: center;
-  color: var(--text-tertiary, var(--text-3));
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.drop.over {
-  border-color: var(--accent, #2ea77a);
-  background: var(--accent-softer, rgba(46, 167, 122, 0.08));
-}
-.drop.busy { opacity: 0.7; }
-.drop p { margin: 0.2rem 0 0; font-size: 0.82rem; }
-.hidden-input { display: none; }
-.link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
   cursor: pointer;
-  text-decoration: underline;
-  color: var(--accent, #2ea77a);
+  background:
+    radial-gradient(70% 120% at 50% 0%, var(--accent-softer), transparent 70%);
+  transition: border-color 0.18s ease, background 0.18s ease;
 }
+.drop:hover { border-color: var(--accent); }
+.drop.over { border-color: var(--accent); background: var(--accent-soft, var(--accent-softer)); }
+.drop.busy { cursor: default; }
+.drop h2 {
+  margin: 0.5rem 0 0;
+  font-size: 1.05rem;
+  color: var(--text-primary, var(--text));
+}
+.drop p {
+  margin: 0.25rem 0 0;
+  max-width: 36rem;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text-tertiary, var(--text-3));
+}
+.drop-ring {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-softer);
+  border: 1px solid var(--accent-soft, var(--accent-softer));
+}
+.hidden-input { display: none; }
+.upload-bar {
+  width: min(22rem, 70%);
+  height: 6px;
+  margin-top: 0.7rem;
+  border-radius: 999px;
+  background: var(--border-color, var(--border));
+  overflow: hidden;
+}
+.upload-bar div {
+  height: 100%;
+  background: var(--grad-accent, var(--accent));
+  transition: width 0.25s ease;
+}
+
+.drop-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+  padding: 0 0.3rem;
+}
+.count-note { font-size: 0.76rem; color: var(--text-tertiary, var(--text-3)); }
+.count-note b { color: var(--accent); }
+.new-project { display: flex; gap: 0.4rem; }
+.new-project .control { width: 14rem; }
+
+/* ── fields ───────────────────────────────────────────────────────── */
+.inline-field { display: flex; align-items: center; gap: 0.45rem; }
+.inline-field.grow { flex: 1 1 20rem; }
+.inline-field > span {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--text-tertiary, var(--text-3));
+}
+.control {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border-color, var(--border));
+  border-radius: 10px;
+  padding: 0.45rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  color: var(--text-primary, var(--text));
+}
+.control.narrow { flex: none; width: 3.6rem; }
+
+.hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-tertiary, var(--text-3));
+}
+.hint.inline { margin: 0; }
+
+/* ── defect chips ─────────────────────────────────────────────────── */
+.source-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.85rem; }
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, var(--border));
+  background: var(--bg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.77rem;
+  color: var(--text-tertiary, var(--text-3));
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.chip:hover { border-color: var(--border-strong, var(--accent)); }
+.chip-name { font-weight: 600; }
+.chip-count { opacity: 0.6; font-variant-numeric: tabular-nums; }
+.chip.on {
+  color: var(--text-primary, var(--text));
+  border-color: var(--accent);
+  background: var(--accent-softer);
+}
+.dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  flex: none;
+  background: var(--text-tertiary, var(--text-3));
+}
+/* Light through, versus more or less rubber. */
+.chip.hole .dot, .chip.tear .dot, .dot.hole { background: var(--amber, #e0a63c); }
+.chip.thin .dot, .chip.thick .dot { background: var(--cyan, #57b6d8); }
+.chip.stain .dot, .chip.particle .dot, .dot.stain { background: var(--accent); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem;
+  margin-top: 0.7rem;
+  font-size: 0.72rem;
+  color: var(--text-tertiary, var(--text-3));
+}
+.legend span { display: flex; align-items: center; gap: 0.35rem; }
 
 /* ── thumbnails ───────────────────────────────────────────────────── */
-.new-project { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
-.new-project .control { flex: 1 1 14rem; }
-
 .strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.9rem;
+  gap: 0.35rem;
+  margin-top: 0.8rem;
   align-items: center;
 }
 .strip figure { margin: 0; }
 .strip img {
-  width: 4.2rem;
-  height: 4.2rem;
+  width: 4rem;
+  height: 4rem;
   object-fit: cover;
   border-radius: 8px;
   border: 1px solid var(--border-color, var(--border));
   background: #000;
 }
-.more {
-  font-size: 0.78rem;
-  color: var(--text-tertiary, var(--text-3));
-}
+.more { font-size: 0.76rem; color: var(--text-tertiary, var(--text-3)); }
 
 /* ── run ──────────────────────────────────────────────────────────── */
-.run-card { margin-top: 0; }
-.run-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
-.job { margin-top: 0.9rem; }
+.run-row { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+.run-spacer { flex: 1 1 auto; }
+.btn.big { padding: 0.6rem 1.1rem; font-size: 0.88rem; }
+
+.job { margin-top: 0.95rem; }
 .job-line { font-size: 0.82rem; color: var(--text-primary, var(--text)); }
 .job-bar {
   margin-top: 0.5rem;
@@ -735,70 +832,93 @@ onBeforeUnmount(() => clearTimeout(timer))
 }
 .job-fill {
   height: 100%;
-  background: var(--accent, #2ea77a);
+  background: var(--grad-accent, var(--accent));
   transition: width 0.3s ease;
 }
-.measured { display: flex; flex-wrap: wrap; gap: 1.4rem; margin: 0.9rem 0 0; }
-.measured div { display: flex; flex-direction: column; gap: 0.1rem; }
+.measured { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0.95rem 0 0; }
+.measured div {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 0 0.45rem;
+}
 .measured dt {
-  font-size: 0.66rem;
+  grid-column: 1 / -1;
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--text-tertiary, var(--text-3));
 }
 .measured dd {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.15rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary, var(--text));
 }
-.measured .good dd { color: var(--accent, #2ea77a); }
-.measured .warn dd { color: #e0a63c; }
+.measured .good dd { color: var(--accent); }
+.measured .warn dd { color: var(--amber, #e0a63c); }
+.swatch {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, var(--border));
+}
 
 /* ── results ──────────────────────────────────────────────────────── */
 .gallery {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 0.7rem;
+  gap: 0.75rem;
   margin-top: 0.9rem;
 }
 .shot { margin: 0; cursor: zoom-in; }
-.shot-frame {
+.frame {
   position: relative;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border-color, var(--border));
   background: #000;
 }
-.shot-frame img { display: block; width: 100%; }
-.overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
+.frame img { display: block; width: 100%; }
+.overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
 .box {
   fill: none;
   stroke: #3ddc9a;
   stroke-width: 6;
   vector-effect: non-scaling-stroke;
 }
+.zoom {
+  position: absolute;
+  right: 0.4rem;
+  bottom: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  opacity: 0;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  transition: opacity 0.15s ease;
+}
+.shot:hover .zoom { opacity: 1; }
 .shot figcaption {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin-top: 0.35rem;
+  margin-top: 0.4rem;
 }
 .tag {
-  padding: 0.12rem 0.45rem;
+  padding: 0.12rem 0.5rem;
   border-radius: 999px;
   font-size: 0.68rem;
   font-weight: 600;
-  background: var(--accent-softer, rgba(46, 167, 122, 0.14));
-  color: var(--accent, #2ea77a);
+  background: var(--accent-softer);
+  color: var(--accent);
 }
 
-/* ── lightbox ─────────────────────────────────────────────────────── */
+/* ── before and after ─────────────────────────────────────────────── */
 .lightbox {
   position: fixed;
   inset: 0;
@@ -807,15 +927,33 @@ onBeforeUnmount(() => clearTimeout(timer))
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: rgba(0, 0, 0, 0.82);
+  background: rgba(0, 0, 0, 0.85);
 }
-.lightbox-inner { max-width: min(90vw, 60rem); width: 100%; }
-.shot-frame.big img { max-height: 76vh; object-fit: contain; margin: 0 auto; }
+.lightbox-inner { width: min(94vw, 68rem); }
+.compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.8rem;
+}
+.compare figure { margin: 0; }
+.compare figcaption {
+  margin-bottom: 0.35rem;
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+.compare .frame img { max-height: 66vh; object-fit: contain; margin: 0 auto; }
+.missing {
+  margin: 0;
+  padding: 3rem 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.6);
+}
 .lightbox-bar {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-top: 0.7rem;
+  margin-top: 0.8rem;
 }
 .lightbox-bar .btn { margin-left: auto; }
 </style>
