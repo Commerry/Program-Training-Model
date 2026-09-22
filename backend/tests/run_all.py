@@ -60,6 +60,8 @@ SUITES = [
      'a detector from elsewhere, pre-labelling a project that has nothing'),
     ('dataset import', TESTS / 'test_dataset_import.py', False,
      'a dataset labelled elsewhere, in YOLO, COCO or VOC'),
+    ('built interface', TESTS / 'test_built_interface.py', False,
+     'the committed build is whole, so a downloaded copy is not a blank page'),
     ('defect synth', TESTS / 'test_defect_synth.py', False,
      'moving a defect between glove colours without moving any pixels'),
     ('defect library', TESTS / 'test_defect_library.py', False,
