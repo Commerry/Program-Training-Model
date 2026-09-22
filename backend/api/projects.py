@@ -207,6 +207,66 @@ def cancel_dataset_import(project_name):
     return ok(datasetimport.cancel(project_name))
 
 
+# ── synthetic defects ───────────────────────────────────────────────────────
+# Every colour of glove is a different grey to a mono camera, so every colour
+# needs its own dataset, and the defects are the rare half of it. These move a
+# defect collected from one colour onto good gloves of another.
+
+@projects_bp.post('/<project_name>/defect-library')
+def collect_defect_library(project_name):
+    """Read the optical signature of every chosen box in this project."""
+    from services import defectlib
+    data = request.get_json(silent=True) or {}
+    return ok(defectlib.harvest(project_name,
+                                labels=data.get('labels'),
+                                per_label=int(data.get('per_label') or 40),
+                                settings=data.get('settings') or {}))
+
+
+@projects_bp.get('/<project_name>/defect-library')
+def defect_library_summary(project_name):
+    from services import defectlib
+    projects.get_project(project_name)
+    return ok(defectlib.summary(project_name))
+
+
+@projects_bp.delete('/<project_name>/defect-library')
+def delete_defect_library(project_name):
+    from services import defectlib
+    projects.get_project(project_name)
+    return ok(defectlib.forget(project_name))
+
+
+@projects_bp.post('/<project_name>/defect-synth')
+def start_defect_synth(project_name):
+    """Put defects from another project's library onto this one's good gloves."""
+    from services import defectlib
+    data = request.get_json(silent=True) or {}
+    source = (data.get('source_project') or '').strip()
+    if not source:
+        raise ProjectError('Choose the project whose defects should be used')
+    return ok({'job': defectlib.start(
+        project_name, source,
+        tags=data.get('tags') or [],
+        per_image=int(data.get('per_image') or 1),
+        settings=data.get('settings') or {},
+    )})
+
+
+@projects_bp.get('/<project_name>/defect-synth')
+def defect_synth_status(project_name):
+    from services import defectlib
+    status = defectlib.get_status(project_name)
+    return ok({'job': status,
+               'running': bool(status and status.get('status') == 'running')})
+
+
+@projects_bp.post('/<project_name>/defect-synth/cancel')
+def cancel_defect_synth(project_name):
+    from services import defectlib
+    return ok(defectlib.cancel(project_name))
+
+
 @projects_bp.get('/<project_name>/review/queue')
 def review_queue(project_name):
     """

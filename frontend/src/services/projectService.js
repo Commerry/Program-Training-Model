@@ -99,6 +99,24 @@ export const projectService = {
   cancelAutoLabel: (name) =>
     http.post(`${base(name)}/auto-label/cancel`).then((r) => r.data),
 
+  // ── synthetic defects ─────────────────────────────────────────────────
+  // Every glove colour is a different grey to a mono camera, so every colour
+  // needs its own dataset and the defects are the rare half of it.
+  collectDefectLibrary: (name, options = {}) =>
+    http.post(`${base(name)}/defect-library`, options).then((r) => r.data),
+
+  defectLibrary: (name) =>
+    http.get(`${base(name)}/defect-library`).then((r) => r.data),
+
+  startDefectSynth: (name, options = {}) =>
+    http.post(`${base(name)}/defect-synth`, options).then((r) => r.data),
+
+  defectSynthStatus: (name) =>
+    http.get(`${base(name)}/defect-synth`).then((r) => r.data),
+
+  cancelDefectSynth: (name) =>
+    http.post(`${base(name)}/defect-synth/cancel`).then((r) => r.data),
+
   // ── importing a dataset labelled elsewhere ────────────────────────────
   // Read from a folder on the machine running the server rather than uploaded:
   // six thousand pictures is not a browser file picker's job.

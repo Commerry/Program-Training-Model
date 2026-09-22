@@ -7,17 +7,7 @@ venv/
 
 # ── Node ────────────────────────────────────────────────────────────────────
 frontend/node_modules/
-# frontend/dist is committed, which build output normally should not be.
-#
-# This gets installed at a new factory each time it is expanded, and those
-# networks block the npm registry: npm resolves every version and then times
-# out fetching every file, so the interface cannot be built on the machine
-# that needs it. The backend serves frontend/dist itself and needs no Node at
-# run time, so shipping the build means a browser download of the repository
-# is a complete, working installation.
-#
-# It is rebuilt and committed alongside any change to frontend/src.
-# frontend/dist/
+frontend/dist/
 npm-debug.log*
 
 # ── Runtime data ────────────────────────────────────────────────────────────
@@ -66,3 +56,4 @@ data/projects/*/index.json
 .idea/
 .DS_Store
 Thumbs.db
+าส

@@ -315,6 +315,97 @@
         </div>
       </div>
 
+      <!--
+        Synthetic defects.
+
+        A mono camera turns rubber colour into one grey level, so a model
+        trained on white gloves is useless on black ones and every colour on
+        every line needs its own dataset. The defects are the rare half of it.
+        This moves a defect collected from one colour onto good gloves of
+        another -- in optical density, which is the only domain where it is
+        physically the same defect.
+      -->
+      <div class="augment-section">
+        <h3 class="section-title">
+          <Icon name="layers" size="sm" />
+          Add Defects From Another Line
+        </h3>
+        <p class="augment-desc">
+          Takes defects already labelled on one glove colour and puts them on
+          this line's good gloves, at the right depth for this colour. The
+          boxes are drawn from what is actually visible afterwards, so the
+          result can be trained on as it is.
+        </p>
+
+        <div class="synth-step">
+          <label class="augment-field">
+            <span>Defects from</span>
+            <select v-model="synthSource" class="augment-select" @change="loadDefectLibrary">
+              <option :value="''">Choose a labelled project…</option>
+              <option v-for="item in otherProjects" :key="item.name" :value="item.name">
+                {{ item.name }}
+              </option>
+            </select>
+          </label>
+          <button class="btn btn-secondary" :disabled="!synthSource || synthCollecting"
+                  @click="collectDefects">
+            <Icon name="download" size="sm" />
+            <span>{{ synthCollecting ? 'Reading...' : 'Collect defects' }}</span>
+          </button>
+        </div>
+
+        <div v-if="synthLibrary" class="synth-labels">
+          <p v-if="!synthLibrary.total" class="augment-desc">
+            Nothing collected from that project yet. Press
+            <strong>Collect defects</strong> to read the optical signature of
+            every box in it.
+          </p>
+          <template v-else>
+            <p class="augment-desc">
+              {{ synthLibrary.total }} defect(s) collected. Tick the ones to use:
+            </p>
+            <label v-for="row in synthLibrary.per_tag" :key="row.tag" class="synth-tag">
+              <input type="checkbox" :value="row.tag" v-model="synthTags" />
+              <span class="synth-tag-name">{{ row.tag }}</span>
+              <span class="synth-tag-meta">{{ row.count }} · {{ row.defect_class }}</span>
+            </label>
+          </template>
+        </div>
+
+        <div v-if="synthError" class="import-error">{{ synthError }}</div>
+
+        <div class="augment-actions">
+          <button v-if="!synthRunning" class="btn btn-primary"
+                  :disabled="!synthTags.length || !unannotatedCount"
+                  @click="runDefectSynth">
+            <Icon name="zap" size="sm" />
+            <span>Add defects to {{ unannotatedCount }} good image{{ unannotatedCount === 1 ? '' : 's' }}</span>
+          </button>
+          <button v-else class="btn btn-danger" @click="cancelDefectSynth">
+            <Icon name="x" size="sm" />
+            <span>Stop</span>
+          </button>
+          <span v-if="!unannotatedCount" class="augment-ok">
+            Import this line's good gloves first — anything already boxed is left alone.
+          </span>
+        </div>
+
+        <div v-if="synthJob" class="import-progress">
+          <span>{{ synthJob.message || synthJob.status }}</span>
+          <div v-if="synthRunning" class="import-bar">
+            <div class="import-fill" :style="{ width: synthPercent + '%' }"></div>
+          </div>
+        </div>
+        <p v-if="synthJob && synthJob.profile" class="augment-desc">
+          Measured on this line: glove {{ Math.round(synthJob.profile.glove_level) }},
+          backlight {{ Math.round(synthJob.profile.bg_level) }},
+          noise {{ synthJob.profile.noise_sigma }}.
+          <span v-if="synthJob.refused">
+            {{ synthJob.refused }} refused as too faint to see on this colour.
+          </span>
+        </p>
+      </div>
+
       <!-- Color Augmentation -->
       <div class="augment-section">
         <h3 class="section-title">
@@ -1019,6 +1110,94 @@ const unannotatedCount = computed(
   () => store.images.filter((image) => !image.annotated).length
 )
 
+// ── defects moved from another glove colour ────────────────────────────────
+const synthSource = ref('')
+const synthLibrary = ref(null)
+const synthTags = ref([])
+const synthJob = ref(null)
+const synthError = ref('')
+const synthCollecting = ref(false)
+
+const otherProjects = computed(
+  () => (store.projects || []).filter((p) => p.name !== projectName.value))
+
+const synthRunning = computed(() => synthJob.value?.status === 'running')
+const synthPercent = computed(() => {
+  const job = synthJob.value
+  if (!job?.total) return 0
+  return Math.round(((job.done || 0) / job.total) * 100)
+})
+
+const loadDefectLibrary = async () => {
+  synthLibrary.value = null
+  synthTags.value = []
+  if (!synthSource.value) return
+  try {
+    synthLibrary.value = await projectService.defectLibrary(synthSource.value)
+  } catch {
+    synthLibrary.value = { total: 0, per_tag: [] }
+  }
+}
+
+const collectDefects = async () => {
+  if (!synthSource.value || synthCollecting.value) return
+  synthCollecting.value = true
+  synthError.value = ''
+  try {
+    synthLibrary.value = await projectService.collectDefectLibrary(
+      synthSource.value, { per_label: 40 })
+    // Everything by default: unticking is quicker than hunting for the ones
+    // worth having.
+    synthTags.value = (synthLibrary.value.per_tag || []).map((row) => row.tag)
+  } catch (err) {
+    synthError.value = errorMessage(err, 'Those defects could not be collected')
+  } finally {
+    synthCollecting.value = false
+  }
+}
+
+const runDefectSynth = async () => {
+  synthError.value = ''
+  try {
+    const { job } = await projectService.startDefectSynth(projectName.value, {
+      source_project: synthSource.value,
+      tags: synthTags.value,
+      per_image: 1
+    })
+    synthJob.value = job
+    pollDefectSynth()
+  } catch (err) {
+    synthError.value = errorMessage(err, 'The run could not be started')
+  }
+}
+
+const cancelDefectSynth = async () => {
+  try {
+    await projectService.cancelDefectSynth(projectName.value)
+  } catch (err) {
+    synthError.value = errorMessage(err, 'It could not be stopped')
+  }
+}
+
+let synthTimer = null
+const pollDefectSynth = () => {
+  clearTimeout(synthTimer)
+  synthTimer = setTimeout(async () => {
+    try {
+      const { job } = await projectService.defectSynthStatus(projectName.value)
+      synthJob.value = job
+      if (job?.status === 'running') {
+        pollDefectSynth()
+      } else if (job?.status === 'finished') {
+        await store.loadProject(projectName.value)
+        await store.loadImages(projectName.value)
+      }
+    } catch {
+      /* the next poll picks it up */
+    }
+  }, 1200)
+}
+
 // ── a dataset labelled somewhere else ──────────────────────────────────────
 // Read from a folder on the machine running the server, not uploaded: six
 // thousand pictures is not a browser file picker's job, and the export
@@ -1194,6 +1373,11 @@ const cancelAutoLabel = async () => {
 
 onMounted(async () => {
   await refresh()
+  // The defect panel offers the other projects as sources, so the list has to
+  // be there even when this page was opened directly by its URL.
+  if (!(store.projects || []).length) {
+    try { await store.fetchProjects() } catch { /* the panel just shows none */ }
+  }
   await loadOtherProjectModels()
   await loadAccuracy()
   // Pre-selecting the newest upload is the common case for a project being
@@ -1209,6 +1393,7 @@ onMounted(async () => {
 
 onBeforeUnmount(stopAutoLabelPolling)
 onBeforeUnmount(() => clearTimeout(importTimer))
+onBeforeUnmount(() => clearTimeout(synthTimer))
 
 const flash = (message) => {
   notice.value = message
@@ -1594,6 +1779,32 @@ const truncateFilename = (filename, maxLength = 20) => {
 .augment-auto-note small {
   color:var(--text-secondary);
   line-height:1.4;
+}
+
+.synth-step {
+  display:flex;
+  gap:0.6rem;
+  align-items:flex-end;
+  flex-wrap:wrap;
+  margin-bottom:0.6rem;
+}
+.synth-labels {
+  display:flex;
+  flex-direction:column;
+  gap:0.3rem;
+  margin-bottom:0.75rem;
+}
+.synth-tag {
+  display:flex;
+  align-items:center;
+  gap:0.5rem;
+  font-size:0.8rem;
+  color:var(--text-primary, var(--text));
+}
+.synth-tag-name { font-weight:600; }
+.synth-tag-meta {
+  font-size:0.72rem;
+  color:var(--text-tertiary, var(--text-3));
 }
 
 .import-dataset {

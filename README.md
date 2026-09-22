@@ -858,6 +858,67 @@ folder whose name is not ASCII, and OpenCV on Windows cannot open such a path
 — `cv2.imread` returns `None` with no error. Sizes are read with Pillow and
 the files are copied rather than re-encoded, which is both faster and lossless.
 
+### Moving a defect from one glove colour to another
+
+A mono camera turns rubber colour into one grey level. A model trained on
+white gloves is useless on black ones, so every colour on every line needs its
+own dataset — and the defects are the rare half of it. Waiting for enough torn
+black gloves to come down the line is what makes a new colour slow to start.
+
+A tear is a tear whatever the rubber behind it; what differs is how much light
+that rubber passes. So a defect already labelled on one colour can be moved
+onto good gloves of another, provided it is moved in the domain where it is
+physically the same thing.
+
+That domain is optical density. Transmitted intensity is `I = I0·exp(-OD)`, so
+material *adds* OD rather than multiplying intensity, and a defect is a local
+change in OD that belongs to the defect rather than to the rubber. Copying
+pixels would carry the source glove's own brightness across and land the wrong
+grey. **Every pixel in the output is a pixel of the target image with its value
+adjusted; none is imported.** That is tested by checking the untouched parts
+come back bit for bit.
+
+The same stain on four glove greys:
+
+```
+grey 180   OD +0.261   grey -41.1
+grey 140   OD +0.262   grey -32.1
+grey 100   OD +0.264   grey -23.1
+grey  60   OD +0.268   grey -14.1
+```
+
+One change in density, four different changes in grey. That is the whole
+point, and getting it the other way round — the same grey shift everywhere —
+is what a paste would do.
+
+A hole is the exception and gets the opposite treatment. It is not thinner
+rubber, it is no rubber: the camera sees the backlight, and the backlight is
+one brightness whatever the glove is made of. So holes and tears are composited
+against an absolute level, and every colour reads the same inside them.
+
+**What is measured, not assumed.** The target line's glove level, backlight
+level, noise and how noise grows with brightness all come from the good images
+themselves — medians and variances, nothing fitted or learned, which is why
+they can be trusted on a line nobody has trained on. Only the lens blur is a
+setting, because it cannot be read off a picture of an unknown object.
+
+**What is refused.** Noise and rubber grain are put back at the destination's
+own scale, because a smooth patch in a grainy picture is the tell that gives a
+paste away. Then the contrast is measured against that noise, and anything
+under an SNR of 3 is thrown out with its number reported rather than written
+into the dataset — a defect nobody can see teaches the detector that ordinary
+rubber is a tear.
+
+**The boxes are drawn from what is visible afterwards**, not from the source
+mask: the same defect shows less on a dark glove, so the box is smaller there.
+The images are written as PNG, because JPEG would both change every pixel and
+can erase a defect that only just cleared the gate.
+
+On the project page: **Add Defects From Another Line** → pick the labelled
+project → **Collect defects** → tick the labels → run. The results arrive
+boxed and ready to train, marked as made rather than seen, and stay out of the
+review queue since their boxes are exact.
+
 ### Learning from corrections, not from its own answers
 
 A pre-labelled picture that somebody has corrected is worth more than either
