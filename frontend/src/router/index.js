@@ -74,6 +74,15 @@ const routes = [
     meta: { requiresAuth: true, title: 'Training history' }
   },
   {
+    // Its own page rather than a panel inside one project: the whole point is
+    // that it works across two of them -- the colour the defects came from
+    // and the line being set up.
+    path: '/defect-studio',
+    name: 'DefectStudio',
+    component: () => import('@/views/DefectStudioView.vue'),
+    meta: { requiresAuth: true, title: 'Defect studio' }
+  },
+  {
     path: '/analytics',
     name: 'Analytics',
     component: () => import('@/views/AnalyticsView.vue'),

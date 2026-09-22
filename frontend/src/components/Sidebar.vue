@@ -27,6 +27,11 @@
         <span class="nav-label">History</span>
       </router-link>
 
+      <router-link to="/defect-studio" class="nav-item" active-class="active">
+        <div class="nav-icon"><Icon name="layers" size="sm" /></div>
+        <span class="nav-label">Defect Studio</span>
+      </router-link>
+
       <router-link to="/analytics" class="nav-item" active-class="active">
         <div class="nav-icon"><Icon name="chart-bar" size="sm" /></div>
         <span class="nav-label">Analytics</span>
