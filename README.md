@@ -92,7 +92,7 @@ administrator**. Without this another machine gets `ERR_CONNECTION_REFUSED`
 while the server sits there working perfectly.
 
 ```powershell
-cd C:\path	o\Program-Training-Model
+cd C:\path\to\Program-Training-Model
 .\start.ps1 -Firewall
 ```
 
@@ -127,15 +127,31 @@ than failing.
 that is about to be left running:
 
 ```powershell
-python backend	ests
+python backend\tests
 un_all.py
 ```
 
-**Later, to update:**
+**Later, to update.** On a machine with git:
 
 ```powershell
-cd C:\path	o\Program-Training-Model; git pull; .\start.ps1 -Network
+cd C:\path\to\Program-Training-Model; git pull; .\start.ps1 -Network
 ```
+
+On a machine without it -- which is the usual case, since these networks
+block the host GitHub serves release files from and Git itself will not
+install:
+
+```powershell
+cd C:\path\to\Program-Training-Model; .\update.ps1; .\start.ps1 -Network
+```
+
+`update.ps1` fetches the repository as a zip and replaces the code --
+backend, the built interface, the launchers -- and nothing else. **`data\`
+and `.env` are never read, written or deleted**, whatever the archive
+contains. That matters because the archive does carry a `data/` directory
+of its own, and extracting it over an installation by hand puts it next to
+that machine's projects, annotations, weights and database.
+`.\update.ps1 -WhatIf` lists what it would replace and changes nothing.
 
 ## Installing on another machine
 
@@ -759,7 +775,7 @@ not trained on: it does not fail, it agrees with everything.
 Nothing in the file records these, so they are found by trying:
 
 ```powershell
-python backend	ools\probe_onnx.py model.onnx folder-of-images
+python backend\tools\probe_onnx.py model.onnx folder-of-images
 ```
 
 It runs all sixteen combinations over real photos and scores each on what a
