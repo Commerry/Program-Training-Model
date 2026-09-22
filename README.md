@@ -127,8 +127,7 @@ than failing.
 that is about to be left running:
 
 ```powershell
-python backend\tests
-un_all.py
+python backend\tests\run_all.py
 ```
 
 **Later, to update.** On a machine with git:
