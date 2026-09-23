@@ -198,21 +198,73 @@ if regions:
           Path((stored.get('auto_label') or {}).get('model', '')).name.startswith('model'),
           stored.get('auto_label'))
 
+print('\n== the whole export folder, zipped ==')
+# An Azure Custom Vision export is a folder, and zipping it is the obvious way
+# to carry it to another machine. The two files an ONNX does not have -- the
+# class names and the preprocessing the exporter recorded -- are in there with
+# it, so the zip is the complete thing and the model file alone is not.
+import zipfile                                          # noqa: E402
+
+bundle = TMP / 'export.zip'
+with zipfile.ZipFile(bundle, 'w') as archive:
+    # Nested under one folder, the way right-clicking a folder zips it.
+    archive.writestr('Iteration42.ONNX/model.onnx', model_path.read_bytes())
+    archive.writestr('Iteration42.ONNX/labels.txt', 'Hole\nSplit\nWhiteSpot\n')
+    archive.writestr('Iteration42.ONNX/cvexport.manifest', '{}')
+    archive.writestr('Iteration42.ONNX/metadata_properties.json',
+                     '{"CustomVision.Preprocess.TargetWidth": "320"}')
+
+r = c.post('/api/models/import', data={
+    'model': (bundle.open('rb'), 'export.zip'),
+    'name': 'from a zip',
+}, content_type='multipart/form-data')
+body = r.get_json() or {}
+check('a zipped export folder is accepted', r.status_code == 200,
+      (r.status_code, body.get('message')))
+check('the class names came out of the zip',
+      body.get('labels') == ['Hole', 'Split', 'WhiteSpot'], body.get('labels'))
+check('and it is still recognised as a Custom Vision export',
+      (body.get('detail') or {}).get('source') == 'Azure Custom Vision',
+      body.get('detail'))
+
+zipped_path = Path(body.get('path') or '.')
+check('the sidecars sit beside the model, not a level up',
+      (zipped_path.parent / 'labels.txt').is_file()
+      and (zipped_path.parent / 'cvexport.manifest').is_file(),
+      sorted(p.name for p in zipped_path.parent.iterdir()))
+check('and the zip itself was not kept',
+      not (zipped_path.parent / 'upload.zip').exists())
+
+print('\n== a zip with no model in it ==')
+empty = TMP / 'nothing.zip'
+with zipfile.ZipFile(empty, 'w') as archive:
+    archive.writestr('readme.txt', 'no model here')
+r = c.post('/api/models/import', data={
+    'model': (empty.open('rb'), 'export.zip'),
+}, content_type='multipart/form-data')
+message = (r.get_json() or {}).get('message', '')
+check('is refused, saying what was expected',
+      r.status_code == 400 and 'model.onnx' in message, (r.status_code, message[:110]))
+
 print('\n== a file that is not a model ==')
 r = c.post('/api/models/import', data={
     'model': (io.BytesIO(b'not a model at all'), 'model.onnx'),
 }, content_type='multipart/form-data')
 check('it is refused at import, not on the first labelling pass',
       r.status_code == 400, r.status_code)
-check('and nothing is left behind',
-      len(((c.get('/api/models/imported').get_json() or {}).get('models')) or []) == 1)
+check('and nothing is left behind -- the two good ones are untouched',
+      len(((c.get('/api/models/imported').get_json() or {}).get('models')) or []) == 2)
 
 print('\n== removing one ==')
 folder = Path(imported_path).parent.name
 r = c.delete(f'/api/models/imported/{folder}')
 check('it is removed', r.status_code == 200, r.status_code)
 remaining = ((c.get('/api/models/imported').get_json() or {}).get('models')) or []
-check('and the listing is empty again', remaining == [], remaining)
+check('and only that one went', len(remaining) == 1,
+      [m['model_name'] for m in remaining])
+check('leaving the one imported from a zip',
+      bool(remaining) and remaining[0]['model_name'] == 'from a zip',
+      [m['model_name'] for m in remaining])
 
 print('\n' + ('IMPORTED MODELS OK' if not fails else f'{len(fails)} FAILED: {fails}'))
 if fails:

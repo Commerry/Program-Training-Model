@@ -36,6 +36,69 @@ ALLOWED_SUFFIXES = {'.pt', '.pth', '.onnx', '.torchscript'}
 
 MAX_LABEL_BYTES = 256 * 1024
 
+# A zip of an export folder is trusted no further than its own member names.
+MAX_UNPACKED_BYTES = 4 * 1024 * 1024 * 1024
+MAX_MEMBERS = 20_000
+
+
+def _extract(zip_path, folder):
+    """
+    Unpack an export folder safely, and say where the model in it ended up.
+
+    An Azure Custom Vision export is a folder, and zipping it is the obvious
+    way to carry it to another machine: model.onnx together with labels.txt
+    and metadata_properties.json, which are the two things an ONNX does not
+    carry and this application reads from beside it. Unpacking the whole
+    folder means those are found exactly as they would have been in place.
+
+    Members are rebuilt from their parts rather than extracted wholesale,
+    because extractall will happily write ../../anywhere.
+    """
+    import zipfile
+
+    written = 0
+    try:
+        archive = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile):
+        raise ProjectError('That file is not a readable .zip')
+
+    with archive:
+        members = archive.infolist()
+        if len(members) > MAX_MEMBERS:
+            raise ProjectError(f'That zip holds {len(members)} entries, which '
+                               'is more than a model export should.')
+        for member in members:
+            if member.is_dir():
+                continue
+            name = member.filename.replace('\\', '/')
+            parts = [p for p in Path(name).parts
+                     if p not in ('', '.', '..') and ':' not in p]
+            if not parts:
+                continue
+            # Flattened: a zip made by right-clicking a folder holds one folder
+            # with everything inside it, and the runner looks for labels.txt
+            # beside the model rather than one level up from it.
+            target = folder / parts[-1]
+            with archive.open(member) as source, open(target, 'wb') as out:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > MAX_UNPACKED_BYTES:
+                        raise ProjectError('That zip unpacks to more than this '
+                                           'will accept.')
+                    out.write(chunk)
+
+    models = sorted(p for p in folder.iterdir()
+                    if p.is_file() and p.suffix.lower() in ALLOWED_SUFFIXES)
+    if not models:
+        kinds = ', '.join(sorted(ALLOWED_SUFFIXES))
+        raise ProjectError(
+            f'No model file in that zip. Expected one of: {kinds}. A Custom '
+            'Vision export folder has model.onnx in it.')
+    return models[0]
+
 
 def _slug(text):
     cleaned = re.sub(r'[^A-Za-z0-9._-]+', '-', str(text or '')).strip('-.')
@@ -70,19 +133,33 @@ def add(model_file, name=None, labels_file=None, conventions=None):
 
     filename = Path(model_file.filename).name
     suffix = Path(filename).suffix.lower()
-    if suffix not in ALLOWED_SUFFIXES:
+    if suffix not in ALLOWED_SUFFIXES and suffix != '.zip':
         raise ProjectError(
-            f'Importable model files: {", ".join(sorted(ALLOWED_SUFFIXES))}')
+            f'Importable model files: {", ".join(sorted(ALLOWED_SUFFIXES))}, '
+            'or a .zip of an export folder')
 
     folder = _unique_folder(name or Path(filename).stem)
     folder.mkdir(parents=True)
     try:
-        target = folder / f'model{suffix}'
-        model_file.save(str(target))
+        if suffix == '.zip':
+            # The whole export folder, so the labels and the preprocessing it
+            # recorded travel with the model instead of being retyped.
+            staged = folder / 'upload.zip'
+            model_file.save(str(staged))
+            target = _extract(staged, folder)
+            staged.unlink(missing_ok=True)
+        else:
+            target = folder / f'model{suffix}'
+            model_file.save(str(target))
         if not target.is_file() or target.stat().st_size == 0:
             raise ProjectError('That model file arrived empty')
 
         labels = []
+        beside = folder / 'labels.txt'
+        if beside.is_file():
+            names = [line.strip() for line in
+                     beside.read_text(encoding='utf-8-sig').splitlines()]
+            labels = [n for n in names if n]
         if labels_file is not None and getattr(labels_file, 'filename', ''):
             raw = labels_file.read(MAX_LABEL_BYTES)
             text = raw.decode('utf-8-sig', errors='replace')

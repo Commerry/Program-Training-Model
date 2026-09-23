@@ -52,6 +52,11 @@ def import_model():
     exactly when this installation has no model of its own to offer. The file
     is kept in its own folder with the class names and, when they are known,
     the conventions it wants to be fed with -- an ONNX carries neither.
+
+    A .zip of the export folder is taken as well, which is the whole of it in
+    one file: an Azure Custom Vision export is model.onnx beside labels.txt
+    and metadata_properties.json, and those two are exactly what the model
+    file alone is missing.
     """
     from services import imported
     return ok(imported.add(

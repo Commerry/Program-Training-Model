@@ -48,7 +48,7 @@
         <label class="btn btn-secondary" title="Import a model from elsewhere">
           <input
             type="file"
-            accept=".onnx,.pt,.pth,.torchscript"
+            accept=".onnx,.pt,.pth,.torchscript,.zip"
             style="display:none"
             @change="importModel"
           />

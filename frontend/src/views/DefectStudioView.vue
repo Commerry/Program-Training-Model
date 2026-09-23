@@ -123,9 +123,42 @@
         to the rubber it was on, which is the part that survives being moved to
         another colour.
       </p>
+
       <p v-else-if="!library.total" class="hint">
         Nothing collected from that project yet. Press <b>Collect defects</b>.
       </p>
+
+      <!--
+        Worth being plain about, because it is the obvious thing to expect and
+        it is not true: a model cannot supply defects. Weights hold no
+        pictures. What a model can do is find defects in photographs you
+        already have, and those photographs then become the source.
+      -->
+      <details class="aside">
+        <summary>No project with defects drawn yet?</summary>
+        <p>
+          A model file cannot stand in for one — an ONNX holds weights and no
+          pictures at all, so there is nothing in it to copy a defect from.
+          What a model <em>can</em> do is put the boxes on defect photographs
+          you already have:
+        </p>
+        <ol>
+          <li>Make a project and put the defect photographs in it.</li>
+          <li>
+            Bring the model in below, then
+            <router-link to="/projects">open that project</router-link> and
+            auto-label with it.
+          </li>
+          <li>Come back and collect from it.</li>
+        </ol>
+        <label class="btn btn-secondary">
+          <input type="file" accept=".onnx,.pt,.pth,.torchscript,.zip"
+                 class="hidden-input" @change="importModel" />
+          <Icon name="upload" size="sm" />
+          <span>{{ importingModel ? 'Importing…' : 'Import a model (.onnx or a zipped export folder)' }}</span>
+        </label>
+        <p v-if="modelNote" class="hint">{{ modelNote }}</p>
+      </details>
 
       <template v-if="library && library.total">
         <div class="chips">
@@ -282,7 +315,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
-import { errorMessage, projectService } from '@/services'
+import { errorMessage, projectService, trainingService } from '@/services'
 
 const projects = ref([])
 const sourceName = ref('')
@@ -305,6 +338,41 @@ const makingNew = ref(false)
 const newName = ref('')
 const creating = ref(false)
 const downloading = ref(false)
+const importingModel = ref(false)
+const modelNote = ref('')
+
+/**
+ * Bring a detector in from here as well as from the annotation toolbar.
+ *
+ * Not because it can supply defects -- it cannot, weights hold no pictures --
+ * but because the route that does work starts with one: a model puts boxes on
+ * defect photographs, and the boxed photographs are then a source to collect
+ * from. Making somebody go elsewhere for the first step of a job that starts
+ * on this page is the kind of friction this page exists to remove.
+ */
+const importModel = async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || importingModel.value) return
+  importingModel.value = true
+  modelNote.value = ''
+  try {
+    const record = await trainingService.importModel(file)
+    const detail = record.detail || {}
+    const parts = [detail.source ? `Recognised as ${detail.source}` : 'Imported']
+    if ((record.labels || []).length) {
+      parts.push(`${record.labels.length} class name(s)`)
+    } else {
+      parts.push('no class names — add its labels.txt in the annotator')
+    }
+    parts.push('now pick it in a project and auto-label with it')
+    modelNote.value = parts.join(' — ')
+  } catch (err) {
+    modelNote.value = errorMessage(err, 'That model could not be imported')
+  } finally {
+    importingModel.value = false
+  }
+}
 
 const running = computed(() => job.value?.status === 'running')
 const canRun = computed(
@@ -786,6 +854,29 @@ onBeforeUnmount(() => clearTimeout(timer))
 .chip.hole .dot, .chip.tear .dot, .dot.hole { background: var(--amber, #e0a63c); }
 .chip.thin .dot, .chip.thick .dot { background: var(--cyan, #57b6d8); }
 .chip.stain .dot, .chip.particle .dot, .dot.stain { background: var(--accent); }
+
+.aside {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, var(--border));
+  background: var(--bg);
+}
+.aside > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary, var(--text));
+}
+.aside p, .aside ol {
+  margin: 0.55rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-tertiary, var(--text-3));
+}
+.aside ol { padding-left: 1.1rem; }
+.aside li { margin-bottom: 0.2rem; }
+.aside .btn { margin-top: 0.7rem; }
 
 .legend {
   display: flex;
