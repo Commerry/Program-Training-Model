@@ -264,6 +264,49 @@ def read_defect(source_project, item, label_ids):
 # ── ครึ่งหลัง: วัดสภาพแสงของไลน์ปลายทาง ────────────────────────────────────
 
 
+def split_glove(gray):
+    """
+    แยกถุงมือออกจากพื้นหลัง โดยไม่เดาว่าฝั่งไหนสว่างกว่า
+
+    Returns (glove_mask, glove_level, bg_level).
+
+    Which side is the glove is decided by which one owns the border of the
+    frame. A background fills the edges by definition -- it is what the glove
+    is sitting in front of -- while a glove photographed to be inspected is
+    somewhere in the middle. That holds whether it is a dark silhouette on a
+    backlight or a bright one on a dark stage, and assuming either brightness
+    outright is what put every defect on the background.
+    """
+    import cv2
+
+    eight = np.clip(gray, 0, 255).astype(np.uint8)
+    threshold, bright = cv2.threshold(eight, 0, 255,
+                                      cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    dark = 255 - bright
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, kernel)
+    bright = cv2.morphologyEx(bright, cv2.MORPH_CLOSE, kernel)
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, kernel)
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, kernel)
+
+    def border_share(mask):
+        edges = np.concatenate([mask[0, :], mask[-1, :],
+                                mask[:, 0], mask[:, -1]])
+        return float((edges > 0).mean())
+
+    # The one that owns less of the border is the object in front.
+    glove_mask = bright if border_share(bright) < border_share(dark) else dark
+    other = dark if glove_mask is bright else bright
+
+    if (glove_mask > 0).sum() < 200 or (other > 0).sum() < 200:
+        return None, None, None
+
+    return (glove_mask,
+            float(np.median(gray[glove_mask > 0])),
+            float(np.median(gray[other > 0])))
+
+
 def estimate_profile(grays, settings=None):
     """
     วัดค่าออปติกของถุงมือสีเป้าหมายจากภาพดีที่ import เข้ามา
@@ -281,36 +324,45 @@ def estimate_profile(grays, settings=None):
 
     for gray in stacked[:24]:
         eight = np.clip(gray, 0, 255).astype(np.uint8)
-        # ถุงมือบังไฟ จึงเป็นฝั่งมืด พื้นหลังคือ backlight
-        threshold, _ = cv2.threshold(eight, 0, 255,
-                                     cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        dark = gray[gray < threshold]
-        bright = gray[gray >= threshold]
-        if dark.size < 500 or bright.size < 500:
+        # ฝั่งไหนคือถุงมือ ตัดสินจากใครครองขอบภาพ ไม่ใช่จากความสว่าง
+        glove_mask, glove_level, bg_level = split_glove(gray)
+        if glove_mask is None:
             continue
-        glove_vals.append(float(np.median(dark)))
-        bg_vals.append(float(np.median(bright)))
+        glove_vals.append(glove_level)
+        bg_vals.append(bg_level)
 
-        # noise = ส่วนที่เหลือหลังหักความสว่างพื้นถิ่นออก
+        # noise = ส่วนที่เหลือหลังหักความสว่างพื้นถิ่นออก วัดบนยางเท่านั้น
         smooth = cv2.medianBlur(eight, 5).astype(np.float32)
         residual = gray - smooth
-        inside = residual[gray < threshold]
+        inside = residual[glove_mask > 0]
         if inside.size > 500:
             # MAD, because the residual also holds every bit of real grain and
             # every edge; a standard deviation would be reporting those.
             noise_vals.append(float(np.median(np.abs(inside)) * 1.4826))
 
-        # k_shot: var = mean * k วัดจากบล็อกเล็กๆ ที่ความสว่างต่างกัน
+        # k_shot: var = mean * k วัดจากบล็อกเล็กๆ บนยาง
+        #
+        # Measured over the rubber only. Taken over the whole frame it is the
+        # background that dominates, and a flat dark background reports a
+        # variance of nothing -- which came out as noise 0 and left the
+        # signal-to-noise gate unable to reject anything at all.
         step = 16
-        cropped = gray[:gray.shape[0] // step * step, :gray.shape[1] // step * step]
-        blocks = cropped.reshape(cropped.shape[0] // step, step,
-                                 cropped.shape[1] // step, step)
+        height = gray.shape[0] // step * step
+        width = gray.shape[1] // step * step
+        cropped = gray[:height, :width]
+        mask_crop = (glove_mask[:height, :width] > 0).astype(np.float32)
+        blocks = cropped.reshape(height // step, step,
+                                 width // step, step)
         blocks = blocks.transpose(0, 2, 1, 3).reshape(-1, step * step)
+        mask_blocks = mask_crop.reshape(height // step, step,
+                                        width // step, step)
+        mask_blocks = mask_blocks.transpose(0, 2, 1, 3).reshape(-1, step * step)
+        on_rubber = mask_blocks.mean(axis=1) > 0.95
         means = blocks.mean(axis=1)
         variances = blocks.var(axis=1)
-        # เอาเฉพาะบล็อกเรียบ ไม่คร่อมขอบ
+        # เอาเฉพาะบล็อกเรียบที่อยู่บนยางทั้งบล็อก
         flat = variances < np.percentile(variances, 40)
-        usable = flat & (means > 5)
+        usable = flat & (means > 5) & on_rubber
         if usable.sum() > 20:
             shot_ratios.extend((variances[usable] / means[usable]).tolist())
             flat_blocks = blocks[usable]
@@ -327,8 +379,13 @@ def estimate_profile(grays, settings=None):
     profile = {
         'glove_level': float(np.median(glove_vals)),
         'bg_level': float(np.median(bg_vals)),
-        'noise_sigma': float(np.median(noise_vals)) if noise_vals else 1.5,
-        'k_shot': float(np.median(shot_ratios)) if shot_ratios else 0.02,
+        # A floor on both: a measurement of zero is not a quiet camera, it is
+        # a measurement that failed, and passing it on disables the gate that
+        # throws out defects too faint to see.
+        'noise_sigma': max(float(np.median(noise_vals)) if noise_vals else 1.5,
+                           0.5),
+        'k_shot': max(float(np.median(shot_ratios)) if shot_ratios else 0.02,
+                      1e-3),
         # PSF cannot be read off a picture of an unknown object, so it is a
         # setting with a sane default rather than a number invented here. One
         # pixel is right for a lens focused on a sensor of this size; the
@@ -343,15 +400,26 @@ def estimate_profile(grays, settings=None):
 
 
 def glove_area(gray):
-    """หาพื้นที่ยางที่วาง defect ได้ (กันขอบไว้ ไม่ให้ล้นออกนอกถุงมือ)"""
+    """
+    หาพื้นที่ยางที่วาง defect ได้ โดยไม่เดาว่าถุงมือสว่างหรือมืด
+
+    A defect on the background is not a defect, it is a mark on the machine
+    behind the glove -- and training on it teaches the detector to look there.
+    Which is what happened while this assumed the glove was always the darker
+    side.
+    """
     import cv2
 
-    eight = np.clip(gray, 0, 255).astype(np.uint8)
-    threshold, mask = cv2.threshold(eight, 0, 255,
-                                    cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask, _, _ = split_glove(gray)
+    if mask is None:
+        return np.zeros(gray.shape[:2], np.uint8)
+
+    # เอาเฉพาะชิ้นใหญ่สุด ไม่ให้เศษเล็กๆ กลายเป็นที่วาง
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8), 8)
+    if count > 1:
+        largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        mask = ((labels == largest).astype(np.uint8) * 255)
     return mask
 
 

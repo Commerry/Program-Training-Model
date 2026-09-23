@@ -225,6 +225,62 @@ ring = made_img[(made_img > 20) & (made_img < 150)]
 check('the rubber still reads dark, not pale',
       abs(float(np.median(ring)) - DARK) < 25, round(float(np.median(ring)), 1))
 
+print('\n== a glove lit from the front, not from behind ==')
+# The other ordinary way to photograph one: a bright glove on a dark stage,
+# rather than a dark silhouette against a backlight. The code assumed the
+# first and took the darker side as the glove every time, so on this kind it
+# measured the background as the glove (16, nearly black), the glove as the
+# backlight (112), and noise as zero -- which also disabled the gate, since
+# nothing can be too faint against no noise. Then it put every defect on the
+# background, where it teaches a detector to look at the machine.
+def lit_frame(level, seed, defect=None):
+    """A bright glove on a dark stage, which is the inverse of the above."""
+    rng = np.random.default_rng(seed)
+    img = np.full((360, 360), 22.0, np.float32)
+    cv2.ellipse(img, (180, 190), (110, 140), 0, 0, 360, float(level), -1)
+    if defect is not None:
+        kind, (cx, cy), radius, strength = defect
+        patch = np.zeros_like(img)
+        cv2.circle(patch, (cx, cy), radius, 1.0, -1)
+        patch = cv2.GaussianBlur(patch, (9, 9), 2.0)
+        img = img * np.exp(-patch * strength)
+    img += rng.standard_normal(img.shape).astype(np.float32) * 1.4
+    return np.clip(img, 0, 255).astype(np.uint8)
+
+
+LIT = 150
+lit = [lit_frame(LIT, 300 + i) for i in range(8)]
+with app.app_context():
+    lit_profile = defectlib.estimate_profile([g.astype(np.float32) for g in lit], {})
+print(f"    glove {lit_profile['glove_level']:.0f}  "
+      f"background {lit_profile['bg_level']:.0f}  "
+      f"noise {lit_profile['noise_sigma']:.2f}  k_shot {lit_profile['k_shot']:.4f}")
+check('the bright glove is read as the glove',
+      abs(lit_profile['glove_level'] - LIT) < 15, lit_profile['glove_level'])
+check('and the dark stage as the background',
+      lit_profile['bg_level'] < 60, lit_profile['bg_level'])
+check('noise is measured on the rubber, not on the empty stage',
+      lit_profile['noise_sigma'] > 0.5, lit_profile['noise_sigma'])
+check('and never reported as nothing, which would disable the gate',
+      lit_profile['k_shot'] > 0, lit_profile['k_shot'])
+
+with app.app_context():
+    area = defectlib.glove_area(lit[0].astype(np.float32))
+covered = float((area > 0).mean())
+check('the area a defect may land on is the glove',
+      0.15 < covered < 0.5, round(covered, 3))
+# The ellipse sits at (180, 190) with radii 110x140, so its middle is inside
+# and a corner of the frame is not.
+check('its middle is inside that area', area[190, 180] > 0)
+check('and the corner of the frame is not', area[5, 5] == 0)
+
+print('\n== and the backlit kind still reads the other way round ==')
+with app.app_context():
+    back_area = defectlib.glove_area(frame(DARK, 7).astype(np.float32))
+check('the dark glove is still the glove',
+      back_area[190, 180] > 0 and back_area[5, 5] == 0,
+      (int(back_area[190, 180]), int(back_area[5, 5])))
+
 print('\n== a library that has not been collected ==')
 c.post('/api/projects', json={'name': 'empty-line'})
 r = c.post('/api/projects/dark-line/defect-synth',
