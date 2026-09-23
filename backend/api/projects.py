@@ -374,6 +374,17 @@ def import_dataset(project_name):
     """
     from services import datasetimport
 
+    # A folder chosen in the browser arrives as its files, each with the path
+    # it had inside that folder. Rebuilding the folder here means somebody can
+    # point at the export directly -- no zipping it first, no typing a path --
+    # and everything downstream reads it exactly as it reads one on disk.
+    loose = request.files.getlist('files')
+    if loose and any(f.filename for f in loose):
+        projects.get_project(project_name)
+        folder = datasetimport.stage_files(
+            project_name, loose, request.form.getlist('paths'))
+        return ok({'job': datasetimport.start(project_name, folder)})
+
     file = request.files.get('file')
     if not file or not file.filename:
         raise ProjectError('No file was uploaded')

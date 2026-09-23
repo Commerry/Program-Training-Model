@@ -290,6 +290,47 @@ check('the climbing member is dropped',
       and not (Path(folder).parent.parent / 'escaped.txt').exists(),
       sorted(p.name for p in Path(folder).rglob('*')))
 
+print('\n== the folder, as a browser hands it over ==')
+# Choosing a folder gives the browser every file inside it, each remembering
+# the path it had within. Those paths are what make it a dataset rather than a
+# heap of files: which one is an image, which is its label, and which names
+# the classes. Sent alongside, they let the folder be rebuilt on the server.
+c.post('/api/projects', json={'name': 'picked-folder'})
+payload = {'files': [], 'paths': []}
+for path in sorted(export.rglob('*')):
+    if path.is_file():
+        payload['files'].append((io.BytesIO(path.read_bytes()), path.name))
+        payload['paths'].append(
+            f'exportblackautos/{path.relative_to(export).as_posix()}')
+
+r = c.post('/api/projects/picked-folder/import-dataset', data=payload,
+           content_type='multipart/form-data')
+body = r.get_json() or {}
+check('a chosen folder is accepted', r.status_code == 200,
+      (r.status_code, body.get('message')))
+check('and recognised as YOLO', (body.get('job') or {}).get('format') == 'yolo',
+      body.get('job'))
+
+with app.app_context():
+    status = datasetimport.wait_for_idle('picked-folder', timeout=120)
+    picked = [projects.read_annotation('picked-folder', e['filename'])
+              for e in projects.list_images('picked-folder')]
+check('all three pictures came in', status.get('imported') == 3, status)
+picked_tags = sorted({r['tag'] for rec in picked for r in (rec.get('regions') or [])})
+check('named from the label.txt that came with them',
+      picked_tags == ['CuffTear', 'DirtM', 'Good'], picked_tags)
+
+print('\n== a path in that upload that tries to climb out ==')
+c.post('/api/projects', json={'name': 'climbing'})
+c.post('/api/projects/climbing/import-dataset', data={
+    'files': [(io.BytesIO(b'no'), 'escaped.txt')],
+    'paths': ['../../escaped.txt'],
+}, content_type='multipart/form-data')
+check('is not written outside the staging folder',
+      not (TMP / 'escaped.txt').exists()
+      and not (TMP.parent / 'escaped.txt').exists(),
+      'it escaped')
+
 print('\n== a second import is a second batch ==')
 c.post('/api/projects/gloves/dataset-import', json={'folder': str(export)})
 with app.app_context():

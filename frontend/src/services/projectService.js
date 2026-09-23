@@ -139,6 +139,26 @@ export const projectService = {
   exportDataset: (name) =>
     http.post(`${base(name)}/export`, {}, { responseType: 'blob' }).then((r) => r.data),
 
+  /**
+   * A dataset folder, file by file, with the path each had inside it.
+   *
+   * Those paths are what make it a dataset rather than a heap of files: which
+   * is an image, which is its label, and which names the classes. The folder
+   * is rebuilt on the server from them.
+   */
+  importDatasetFolder: (name, files) => {
+    const form = new FormData()
+    for (const file of files) {
+      form.append('files', file)
+      form.append('paths', file.webkitRelativePath || file.name)
+    }
+    return http
+      .post(`${base(name)}/import-dataset`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      .then((r) => r.data)
+  },
+
   importDataset: (name, file) => {
     const form = new FormData()
     form.append('file', file)

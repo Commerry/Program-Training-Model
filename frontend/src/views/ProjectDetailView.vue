@@ -18,10 +18,6 @@
             <Icon name="upload" size="sm" />
             <span>Import</span>
           </button>
-          <button @click="showImportDataset = true" class="btn btn-secondary">
-            <Icon name="package" size="sm" />
-            <span>Dataset</span>
-          </button>
           <button @click="exportDataset" class="btn btn-secondary">
             <Icon name="download" size="sm" />
             <span>Export</span>
@@ -233,66 +229,6 @@
               </tr>
             </tbody>
           </table>
-        </div>
-
-        <!--
-          A dataset already labelled elsewhere is worth more than a model
-          exported from it: a model is a frozen answer, the pictures can be
-          trained again, corrected and extended.
-        -->
-        <div class="import-dataset">
-          <div class="import-row">
-            <input
-              v-model="importFolder"
-              class="import-input"
-              type="text"
-              placeholder="Folder the dataset was exported to, e.g. D:\export"
-              @keyup.enter="checkImportFolder"
-            />
-            <button class="btn btn-secondary" :disabled="importChecking || importRunning"
-                    @click="checkImportFolder">
-              <Icon name="search" size="sm" />
-              <span>{{ importChecking ? 'Reading...' : 'Check folder' }}</span>
-            </button>
-          </div>
-          <p class="import-hint">
-            YOLO (images + labels + label.txt), COCO (.json) or Pascal VOC (.xml).
-            Read from the machine running the server.
-          </p>
-
-          <div v-if="importError" class="import-error">{{ importError }}</div>
-
-          <div v-if="importPreview" class="import-found">
-            <div>
-              <strong>{{ importPreview.format.toUpperCase() }}</strong>
-              — {{ importPreview.images }} annotation(s),
-              {{ importPreview.boxes ?? '?' }} box(es),
-              {{ (importPreview.classes || []).length }} class(es)
-              <span v-if="importPreview.classes_from">
-                from {{ importPreview.classes_from }}
-              </span>
-            </div>
-            <div v-if="(importPreview.classes || []).length" class="import-classes">
-              {{ importPreview.classes.join(', ') }}
-            </div>
-            <div v-for="warning in importPreview.warnings" :key="warning"
-                 class="import-warning">{{ warning }}</div>
-            <button v-if="!importRunning" class="btn btn-primary" @click="runDatasetImport">
-              <Icon name="download" size="sm" />
-              <span>Import {{ importPreview.images }} image(s)</span>
-            </button>
-          </div>
-
-          <div v-if="importJob" class="import-progress">
-            <span>{{ importJob.message || importJob.status }}</span>
-            <div v-if="importRunning" class="import-bar">
-              <div class="import-fill" :style="{ width: importPercent + '%' }"></div>
-            </div>
-            <button v-if="importRunning" class="btn btn-danger" @click="cancelDatasetImport">
-              <Icon name="x" size="sm" />
-              <span>Stop</span>
-            </button>
-          </div>
         </div>
 
         <div class="augment-actions">
@@ -729,17 +665,63 @@
     <div v-if="showImportImages" class="modal-overlay" @click="showImportImages = false">
       <div class="modal" @click.stop>
         <div class="modal-header">
-          <h3 class="modal-title">Import Images</h3>
+          <h3 class="modal-title">Import</h3>
           <button @click="showImportImages = false" class="modal-close">&times;</button>
         </div>
         
         <div class="modal-body">
-          <div class="upload-area" @click="fileInput.click()" @drop.prevent="handleDrop" @dragover.prevent>
+          <!--
+            One dialog for everything that comes in. The difference between
+            the ways is what somebody needs told, and three separate doors in
+            three parts of the page told them nothing: photographs have no
+            boxes, a dataset brings its own, and a folder already on this
+            machine never has to travel through a browser.
+          -->
+          <div class="import-tabs">
+            <button :class="['import-tab', { on: importWay === 'images' }]"
+                    @click="importWay = 'images'">Photographs</button>
+            <button :class="['import-tab', { on: importWay === 'folder' }]"
+                    @click="importWay = 'folder'">Dataset folder</button>
+            <button :class="['import-tab', { on: importWay === 'path' }]"
+                    @click="importWay = 'path'">Folder on this server</button>
+          </div>
+
+          <p v-if="importWay === 'images'" class="import-why">
+            Pictures on their own, to be boxed here or by a model. Choose a
+            folder and every image in it comes in.
+          </p>
+          <p v-else-if="importWay === 'folder'" class="import-why">
+            An export with the boxes already in it — YOLO (<code>images/</code>
+            beside <code>labels/</code> and a <code>label.txt</code>), COCO or
+            Pascal VOC. Choose the folder holding those, not the pictures
+            inside it.
+          </p>
+          <p v-else class="import-why">
+            Fastest for a large export: read straight off this machine's disk,
+            so gigabytes of pictures never go through the browser at all.
+          </p>
+
+          <div v-if="importWay === 'images'" class="upload-area" @click="fileInput.click()" @drop.prevent="handleDrop" @dragover.prevent>
             <input
               type="file"
               ref="fileInput"
               multiple
               accept=".jpg,.jpeg,.png,.bmp,.webp"
+              @change="handleFileSelect"
+              style="display: none"
+            />
+            <!--
+              webkitdirectory is what makes the dialog offer folders instead
+              of files. It needs its own input: one carrying the attribute can
+              only ever pick a folder, and picking a handful of files has to
+              stay possible.
+            -->
+            <input
+              type="file"
+              ref="imageFolderInput"
+              webkitdirectory
+              directory
+              multiple
               @change="handleFileSelect"
               style="display: none"
             />
@@ -749,7 +731,83 @@
                 <Icon name="folder" size="4xl" />
               </div>
               <p>Click or drag images here</p>
-              <p class="upload-hint">Support: JPG, PNG, BMP, WEBP</p>
+              <p class="upload-hint">JPG, PNG, BMP, WEBP</p>
+              <button class="btn btn-secondary btn-sm"
+                      @click.stop="imageFolderInput.click()">
+                <Icon name="folder" size="sm" />
+                <span>Choose a folder instead</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- a labelled export, chosen as the folder it is -->
+          <div v-else-if="importWay === 'folder'">
+            <div class="upload-area" @click="datasetFolderInput.click()">
+              <input
+                type="file"
+                ref="datasetFolderInput"
+                webkitdirectory
+                directory
+                multiple
+                @change="handleDatasetFolder"
+                style="display: none"
+              />
+              <div class="upload-content">
+                <div class="upload-icon"><Icon name="package" size="4xl" /></div>
+                <p>Choose the export folder</p>
+                <p class="upload-hint">
+                  Its images, labels and label.txt come in together
+                </p>
+              </div>
+            </div>
+            <p class="import-why">
+              {{ datasetFiles.length
+                 ? `${datasetFiles.length} file(s) ready from ${datasetFolderName}.`
+                 : 'Or a .zip of that folder:' }}
+              <button v-if="!datasetFiles.length" class="link-button"
+                      @click="datasetInput.click()">choose a zip</button>
+              <input type="file" ref="datasetInput" accept=".zip"
+                     @change="handleDatasetSelect" style="display: none" />
+              <span v-if="selectedDataset"> — {{ selectedDataset.name }}</span>
+            </p>
+          </div>
+
+          <!-- already on the machine running the server -->
+          <div v-else>
+            <div class="import-row">
+              <input v-model="importFolder" class="import-input" type="text"
+                     placeholder="E:\imageglovevision\exportblackautos"
+                     @keyup.enter="checkImportFolder" />
+              <button class="btn btn-secondary"
+                      :disabled="importChecking || importRunning"
+                      @click="checkImportFolder">
+                <Icon name="search" size="sm" />
+                <span>{{ importChecking ? 'Reading…' : 'Check folder' }}</span>
+              </button>
+            </div>
+            <div v-if="importPreview" class="import-found">
+              <div>
+                <strong>{{ importPreview.format.toUpperCase() }}</strong>
+                — {{ importPreview.images }} annotation(s),
+                {{ importPreview.boxes ?? '?' }} box(es),
+                {{ (importPreview.classes || []).length }} class(es)
+                <span v-if="importPreview.classes_from">
+                  from {{ importPreview.classes_from }}
+                </span>
+              </div>
+              <div v-if="(importPreview.classes || []).length" class="import-classes">
+                {{ importPreview.classes.join(', ') }}
+              </div>
+              <div v-for="warning in importPreview.warnings" :key="warning"
+                   class="import-warning">{{ warning }}</div>
+              <button v-if="!importRunning" class="btn btn-primary"
+                      @click="runDatasetImport">
+                <Icon name="download" size="sm" />
+                <span>Import {{ importPreview.images }} image(s)</span>
+              </button>
+            </div>
+            <div v-if="importJob" class="import-progress">
+              <span>{{ importJob.message || importJob.status }}</span>
             </div>
           </div>
           
@@ -775,67 +833,30 @@
         
         <div class="modal-footer">
           <button @click="showImportImages = false" class="btn btn-secondary">
-            Cancel
+            Close
           </button>
           <button
+            v-if="importWay === 'images'"
             @click="uploadImages"
             :disabled="selectedFiles.length === 0 || uploading"
             class="btn btn-primary"
           >
             {{ uploading ? 'Uploading…' : `Upload ${selectedFiles.length} images` }}
           </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Import Dataset Modal -->
-    <div v-if="showImportDataset" class="modal-overlay" @click="showImportDataset = false">
-      <div class="modal" @click.stop>
-        <div class="modal-header">
-          <h3 class="modal-title">Import Dataset</h3>
-          <button @click="showImportDataset = false" class="modal-close">&times;</button>
-        </div>
-        
-        <div class="modal-body">
-          <div class="upload-area" @click="datasetInput.click()">
-            <input
-              type="file"
-              ref="datasetInput"
-              accept=".zip"
-              @change="handleDatasetSelect"
-              style="display: none"
-            />
-            
-            <div class="upload-content">
-              <div class="upload-icon">
-                <Icon name="package" size="4xl" />
-              </div>
-              <p>Click to select dataset ZIP file</p>
-              <p class="upload-hint">Previously exported dataset</p>
-            </div>
-          </div>
-          
-          <div v-if="selectedDataset" class="selected-files">
-            <p>Selected: {{ selectedDataset.name }}</p>
-          </div>
-
-          <p v-if="actionError" class="error-message">{{ actionError }}</p>
-        </div>
-        
-        <div class="modal-footer">
-          <button @click="showImportDataset = false" class="btn btn-secondary">
-            Cancel
-          </button>
           <button
+            v-else-if="importWay === 'folder'"
             @click="uploadDataset"
-            :disabled="!selectedDataset || uploading"
+            :disabled="(!datasetFiles.length && !selectedDataset) || uploading"
             class="btn btn-primary"
           >
-            {{ uploading ? 'Importing...' : 'Import Dataset' }}
+            {{ uploading ? 'Reading…'
+               : datasetFiles.length ? `Import ${datasetFiles.length} file(s)`
+               : 'Import the zip' }}
           </button>
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -855,7 +876,14 @@ const store = useProjectStore()
 const projectName = computed(() => route.params.name)
 
 const showImportImages = ref(false)
-const showImportDataset = ref(false)
+// Which way in is showing. The dialog is one place with three, because the
+// three are not alternatives to choose between so much as answers to
+// different situations, and saying which is which is most of the help.
+const importWay = ref('images')
+const imageFolderInput = ref(null)
+const datasetFolderInput = ref(null)
+const datasetFiles = ref([])
+const datasetFolderName = ref('')
 const selectedFiles = ref([])
 const selectedDataset = ref(null)
 const uploading = ref(false)
@@ -1419,6 +1447,70 @@ const handleDatasetSelect = (event) => {
   selectedDataset.value = event.target.files[0] || null
 }
 
+/**
+ * A dataset folder, as the browser hands it over.
+ *
+ * Choosing a folder gives every file inside it, each remembering its path
+ * within. Those paths are what make it a dataset rather than a heap: which
+ * file is an image, which is its label, and which is the label.txt naming the
+ * classes. They are sent alongside the files and the folder is rebuilt on the
+ * server, so the reader sees exactly what it would have seen on disk.
+ */
+const handleDatasetFolder = (event) => {
+  const files = Array.from(event.target.files || [])
+  datasetFiles.value = files
+  datasetFolderName.value = files.length
+    ? (files[0].webkitRelativePath || files[0].name).split('/')[0]
+    : ''
+  selectedDataset.value = null
+  actionError.value = null
+  if (!files.length) return
+
+  const names = files.map((f) => (f.webkitRelativePath || f.name).toLowerCase())
+  const looksLabelled = names.some(
+    (n) => n.endsWith('/label.txt') || n.endsWith('/labels.txt')
+        || n.endsWith('/classes.txt') || n.includes('/labels/')
+        || n.endsWith('.json') || n.endsWith('.xml'))
+  if (!looksLabelled) {
+    // Photographs with nothing to say what is in them. Better to say so now
+    // than to import them and leave somebody wondering where the boxes went.
+    actionError.value = 'No labels in that folder — it looks like plain '
+      + 'photographs. Use the Photographs tab for those.'
+  }
+}
+
+const uploadDataset = async () => {
+  if (uploading.value) return
+  uploading.value = true
+  actionError.value = null
+  try {
+    let result
+    if (datasetFiles.value.length) {
+      result = await projectService.importDatasetFolder(
+        projectName.value, datasetFiles.value)
+    } else {
+      result = await projectService.importDataset(
+        projectName.value, selectedDataset.value)
+    }
+    datasetFiles.value = []
+    selectedDataset.value = null
+    if (result.job) {
+      importJob.value = result.job
+      flash(`Reading ${result.job.total || ''} annotation(s)…`)
+      pollDatasetImport()
+      showImportImages.value = false
+    } else {
+      flash(result.message)
+      await refresh()
+      showImportImages.value = false
+    }
+  } catch (error) {
+    actionError.value = errorMessage(error)
+  } finally {
+    uploading.value = false
+  }
+}
+
 const uploadImages = async () => {
   if (!selectedFiles.value.length || uploading.value) return
   uploading.value = true
@@ -1445,34 +1537,6 @@ const uploadImages = async () => {
   } finally {
     uploading.value = false
     uploadProgress.value = 0
-  }
-}
-
-const uploadDataset = async () => {
-  if (!selectedDataset.value || uploading.value) return
-  uploading.value = true
-  actionError.value = null
-  try {
-    const result = await projectService.importDataset(projectName.value, selectedDataset.value)
-    showImportDataset.value = false
-    selectedDataset.value = null
-    if (datasetInput.value) datasetInput.value.value = ''
-    if (result.job) {
-      // A zip from another tool is unpacked and read in the background:
-      // thousands of pictures take minutes, so the answer is a job, not a
-      // count.
-      importJob.value = result.job
-      flash(`Reading ${result.job.total || ''} annotation(s) — ${result.job.format
-        ? result.job.format.toUpperCase() : ''}`)
-      pollDatasetImport()
-    } else {
-      flash(result.message)
-      await refresh()
-    }
-  } catch (error) {
-    actionError.value = errorMessage(error)
-  } finally {
-    uploading.value = false
   }
 }
 
@@ -1806,6 +1870,51 @@ const truncateFilename = (filename, maxLength = 20) => {
   font-size:0.72rem;
   color:var(--text-tertiary, var(--text-3));
 }
+
+.import-tabs {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.8rem;
+  padding: 0.25rem;
+  border-radius: 10px;
+  background: var(--bg);
+}
+.import-tab {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.78rem;
+  color: var(--text-tertiary, var(--text-3));
+}
+.import-tab.on {
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-weight: 600;
+}
+.import-why {
+  margin: 0 0 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: var(--text-tertiary, var(--text-3));
+}
+.import-why code {
+  font-size: 0.74rem;
+  color: var(--text-primary, var(--text));
+}
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  color: var(--accent);
+}
+.import-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .import-dataset {
   border:1px solid var(--border-color, var(--border));

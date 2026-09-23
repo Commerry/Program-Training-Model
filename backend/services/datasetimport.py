@@ -205,6 +205,58 @@ def unpack(zip_path, project_name):
     return staging
 
 
+def stage_files(project_name, uploads, relative_paths=None):
+    """
+    Rebuild a folder from the files a browser folder-picker sent, and say where.
+
+    Choosing a folder gives the browser every file in it, each remembering the
+    path it had inside. Writing them back out under those paths turns the
+    upload into the same folder the rest of this module already knows how to
+    read, so a Custom Vision export can be pointed at directly -- no zipping
+    it first, no typing a path.
+
+    Only the parts of each path that are plain relative names are kept, so a
+    crafted path cannot write outside the staging folder.
+    """
+    from config import INSTANCE_DIR
+
+    staging = (Path(INSTANCE_DIR) / 'dataset-uploads'
+               / projects.safe_filename(project_name))
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True, exist_ok=True)
+
+    relative_paths = list(relative_paths or [])
+    written = 0
+    for index, upload in enumerate(uploads):
+        if not upload or not upload.filename:
+            continue
+        raw = (relative_paths[index] if index < len(relative_paths)
+               else upload.filename)
+        parts = [p for p in Path(str(raw).replace('\\', '/')).parts
+                 if p not in ('', '.', '..') and ':' not in p]
+        if not parts:
+            continue
+        target = staging.joinpath(*parts)
+        try:
+            target.resolve().relative_to(staging.resolve())
+        except ValueError:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        upload.save(str(target))
+        written += 1
+
+    if not written:
+        raise ProjectError('None of those files could be read')
+
+    # Choosing the folder itself gives one folder holding everything, which is
+    # a level deeper than the reader expects.
+    entries = [p for p in staging.iterdir() if not p.name.startswith('.')]
+    if len(entries) == 1 and entries[0].is_dir():
+        return entries[0]
+    return staging
+
+
 def detect(raw_path):
     """
     What is in this folder, without changing anything.
