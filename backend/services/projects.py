@@ -640,6 +640,13 @@ def list_images(name):
             # before uploads were numbered, which reads as the original set.
             'batch': entry.get('batch'),
             'imported_at': entry.get('imported_at'),
+            # Where this picture came from: the name it was uploaded under, or
+            # -- for one a defect was synthesised onto -- the good glove it was
+            # made from. The studio pairs each result with its original from
+            # this to show them side by side, which is the only way to judge
+            # whether a made defect is worth training on.
+            'original_name': entry.get('original_name'),
+            'synthetic': bool(entry.get('synthetic')),
             'size_kb': entry.get('size_kb'),
         })
     return result

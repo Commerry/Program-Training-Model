@@ -873,6 +873,47 @@ folder whose name is not ASCII, and OpenCV on Windows cannot open such a path
 — `cv2.imread` returns `None` with no error. Sizes are read with Pillow and
 the files are copied rather than re-encoded, which is both faster and lossless.
 
+## Which file goes where
+
+Four different things take a file and three of them take a zip, so it is worth
+one table. The commonest confusion is that a **model** and a **dataset** are
+not interchangeable and neither can stand in for the other: a model is weights
+and holds no pictures at all, a dataset is pictures and holds no weights.
+
+| Where | What it wants | What it is for |
+| --- | --- | --- |
+| **Projects → Import dataset**, or a folder path | a **dataset**: images with their boxes | filling a project with work already done |
+| **Defect Studio → Collected from** | a **dataset** with defects boxed | the defects themselves, to move onto another colour |
+| **Defect Studio → drop zone** (top) | plain **photographs**, no boxes | the good gloves of the line being set up |
+| **Annotate → Import model**, or the studio's note | a **model**: `.onnx`, `.pt`, or a zip of an export folder | drawing boxes on pictures that have none |
+
+Azure Custom Vision exports both, and they are different downloads:
+
+```
+Export → ONNX                    model.onnx, labels.txt, metadata_properties.json
+                                 weights. No pictures. Use it to label with.
+
+Export → training images         images/, labels/, label.txt
+                                 pictures and boxes. Use it as a dataset.
+```
+
+A dataset export is accepted three ways, and the first is much the fastest:
+
+1. **A folder path**, on the project page, read straight off the disk of the
+   machine running the server. Six thousand pictures is several gigabytes and
+   does not want to go through a browser at all.
+2. **A zip**, dropped on the Defect Studio, which makes the project, imports
+   into it and selects it in one action.
+3. **A zip**, through *Import dataset* on the project page.
+
+The layouts read are YOLO (`images/` beside `labels/` and a `label.txt`), COCO
+(one `.json`) and Pascal VOC (one `.xml` per image).
+
+Putting the wrong one in is refused with what was expected instead, rather
+than accepted into a state where nothing works: a model zip offered as a
+dataset says there are no images in it, and a dataset zip offered as a model
+says there is no model file in it.
+
 ### Moving a defect from one glove colour to another
 
 A mono camera turns rubber colour into one grey level. A model trained on
