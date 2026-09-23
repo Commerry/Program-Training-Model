@@ -100,6 +100,12 @@
         <span v-if="tags.length" class="pill">{{ tags.length }} chosen</span>
       </div>
 
+      <p class="hint top">
+        This wants a <b>dataset</b> — photographs with the defects already
+        boxed. A model file is the wrong thing here and cannot stand in for
+        one; there is a note below on what a model <em>is</em> good for.
+      </p>
+
       <div class="source-row">
         <label class="inline-field grow">
           <span>Collected from</span>
@@ -129,6 +135,29 @@
       </p>
 
       <!--
+        The dropdown lists projects, and somebody arriving with an export from
+        another tool has none -- so it offers a list of nothing and no way to
+        fill it. Sending them to another page to make a project, import into
+        it and come back is three steps for what is one action.
+      -->
+      <div :class="['mini-drop', { over: datasetOver, busy: importingSet }]"
+           @dragover.prevent="datasetOver = true"
+           @dragleave.prevent="datasetOver = false"
+           @drop.prevent="onDatasetDrop"
+           @click="importingSet ? null : datasetInput?.click()">
+        <input ref="datasetInput" type="file" accept=".zip" class="hidden-input"
+               @change="onDatasetPick" />
+        <Icon name="upload" size="sm" />
+        <span v-if="!importingSet">
+          <b>Not in the list?</b> Drop a <b>.zip of a labelled dataset</b> here
+          — YOLO (images + labels + label.txt), COCO (.json) or Pascal VOC
+          (.xml). It becomes a project and appears above.
+        </span>
+        <span v-else>{{ datasetNote || 'Reading the dataset…' }}</span>
+      </div>
+      <p v-if="datasetNote && !importingSet" class="hint">{{ datasetNote }}</p>
+
+      <!--
         Worth being plain about, because it is the obvious thing to expect and
         it is not true: a model cannot supply defects. Weights hold no
         pictures. What a model can do is find defects in photographs you
@@ -155,9 +184,14 @@
           <input type="file" accept=".onnx,.pt,.pth,.torchscript,.zip"
                  class="hidden-input" @change="importModel" />
           <Icon name="upload" size="sm" />
-          <span>{{ importingModel ? 'Importing…' : 'Import a model (.onnx or a zipped export folder)' }}</span>
+          <span>{{ importingModel ? 'Importing…' : 'Import a model file (.onnx, .pt, or a zipped export folder)' }}</span>
         </label>
         <p v-if="modelNote" class="hint">{{ modelNote }}</p>
+        <div v-if="modelLabels.length" class="chips quiet">
+          <span v-for="name in modelLabels" :key="name" class="chip flat">
+            {{ name }}
+          </span>
+        </div>
       </details>
 
       <template v-if="library && library.total">
@@ -340,6 +374,81 @@ const creating = ref(false)
 const downloading = ref(false)
 const importingModel = ref(false)
 const modelNote = ref('')
+const modelLabels = ref([])
+const importingSet = ref(false)
+const datasetOver = ref(false)
+const datasetNote = ref('')
+const datasetInput = ref(null)
+
+/**
+ * A labelled dataset, brought in where it is needed.
+ *
+ * The list above holds projects, and somebody arriving with an export from
+ * another tool has none. This makes the project, imports into it and selects
+ * it -- three steps that otherwise happen on two other pages.
+ */
+const importDataset = async (file) => {
+  if (!file || importingSet.value) return
+  importingSet.value = true
+  datasetNote.value = ''
+  error.value = ''
+  try {
+    const now = new Date()
+    const stamp = `${now.getFullYear()}`
+      + `${String(now.getMonth() + 1).padStart(2, '0')}`
+      + `${String(now.getDate()).padStart(2, '0')}`
+    let name = `defects-${stamp}`
+    let suffix = 2
+    const taken = new Set(projects.value.map((p) => p.name))
+    while (taken.has(name)) name = `defects-${stamp}-${suffix++}`
+
+    await projectService.create(name)
+    const result = await projectService.importDataset(name, file)
+    await refreshProjects()
+    sourceName.value = name
+
+    if (result.job) {
+      datasetNote.value = `Reading ${result.job.total || ''} annotation(s)…`
+      await waitForDataset(name)
+    } else {
+      datasetNote.value = result.message || 'Imported.'
+    }
+    await loadLibrary()
+  } catch (err) {
+    datasetNote.value = errorMessage(err, 'That dataset could not be read')
+  } finally {
+    importingSet.value = false
+  }
+}
+
+const waitForDataset = (name) => new Promise((resolve) => {
+  const tick = async () => {
+    try {
+      const { job } = await projectService.datasetImportStatus(name)
+      if (job?.status === 'running') {
+        datasetNote.value = job.message || 'Reading…'
+        setTimeout(tick, 1200)
+        return
+      }
+      datasetNote.value = job?.message || 'Imported.'
+      await refreshProjects()
+    } catch {
+      datasetNote.value = 'Imported.'
+    }
+    resolve()
+  }
+  tick()
+})
+
+const onDatasetPick = (event) => {
+  importDataset(event.target.files?.[0])
+  event.target.value = ''
+}
+
+const onDatasetDrop = (event) => {
+  datasetOver.value = false
+  importDataset(event.dataTransfer?.files?.[0])
+}
 
 /**
  * Bring a detector in from here as well as from the annotation toolbar.
@@ -359,13 +468,14 @@ const importModel = async (event) => {
   try {
     const record = await trainingService.importModel(file)
     const detail = record.detail || {}
+    modelLabels.value = record.labels || []
     const parts = [detail.source ? `Recognised as ${detail.source}` : 'Imported']
-    if ((record.labels || []).length) {
-      parts.push(`${record.labels.length} class name(s)`)
+    if (modelLabels.value.length) {
+      parts.push(`${modelLabels.value.length} class name(s), listed below`)
     } else {
       parts.push('no class names — add its labels.txt in the annotator')
     }
-    parts.push('now pick it in a project and auto-label with it')
+    parts.push('it is now in the model list on every project, for auto-labelling')
     modelNote.value = parts.join(' — ')
   } catch (err) {
     modelNote.value = errorMessage(err, 'That model could not be imported')
@@ -854,6 +964,29 @@ onBeforeUnmount(() => clearTimeout(timer))
 .chip.hole .dot, .chip.tear .dot, .dot.hole { background: var(--amber, #e0a63c); }
 .chip.thin .dot, .chip.thick .dot { background: var(--cyan, #57b6d8); }
 .chip.stain .dot, .chip.particle .dot, .dot.stain { background: var(--accent); }
+
+.mini-drop {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.85rem;
+  border: 1.5px dashed var(--border-strong, var(--border));
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-tertiary, var(--text-3));
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.mini-drop:hover { border-color: var(--accent); }
+.mini-drop.over { border-color: var(--accent); background: var(--accent-softer); }
+.mini-drop.busy { cursor: default; }
+.mini-drop b { color: var(--text-primary, var(--text)); }
+
+.hint.top { margin: 0 0 0.7rem; }
+.chips.quiet { margin-top: 0.6rem; }
+.chip.flat { cursor: default; padding: 0.2rem 0.5rem; font-size: 0.7rem; }
 
 .aside {
   margin-top: 0.8rem;
