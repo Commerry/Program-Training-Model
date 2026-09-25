@@ -210,6 +210,46 @@ def _tighten(delta_od, spread):
     return (delta_od * alpha).astype(np.float32), (alpha * 255).astype(np.float32)
 
 
+def _write_preview(folder, tag, gray, x1, y1, x2, y2):
+    """
+    บันทึกภาพตัวอย่างของ defect ชนิดนี้ พร้อมยางรอบๆ ให้ดูออกว่าคืออะไร
+
+    Picking from a list of nineteen names is guesswork unless somebody wrote
+    down what each one looks like, and nobody did. Picking from nineteen
+    pictures is just looking.
+    """
+    import cv2
+
+    pad = max(20, int(0.6 * max(x2 - x1, y2 - y1)))
+    cy1, cy2 = max(0, y1 - pad), min(gray.shape[0], y2 + pad)
+    cx1, cx2 = max(0, x1 - pad), min(gray.shape[1], x2 + pad)
+    crop = np.clip(gray[cy1:cy2, cx1:cx2] - 1.0, 0, 255).astype(np.uint8)
+    if crop.size == 0:
+        return
+
+    canvas = cv2.cvtColor(crop, cv2.COLOR_GRAY2BGR)
+    cv2.rectangle(canvas, (x1 - cx1, y1 - cy1), (x2 - cx1, y2 - cy1),
+                  (90, 220, 150), max(1, int(min(canvas.shape[:2]) / 90)))
+
+    # Small: this is a thumbnail in a list, not evidence.
+    longest = max(canvas.shape[:2])
+    if longest > 220:
+        scale = 220 / longest
+        canvas = cv2.resize(canvas, (int(canvas.shape[1] * scale),
+                                     int(canvas.shape[0] * scale)),
+                            interpolation=cv2.INTER_AREA)
+
+    ok, encoded = cv2.imencode('.png', canvas)
+    if ok:
+        (folder / f'preview-{_slug(tag)}.png').write_bytes(encoded.tobytes())
+
+
+def preview_path(source_project, tag):
+    """ไฟล์ภาพตัวอย่างของ label นี้ ถ้ามี"""
+    path = library_dir(source_project) / f'preview-{_slug(tag)}.png'
+    return path if path.is_file() else None
+
+
 def harvest(source_project, labels=None, per_label=40, settings=None):
     """
     อ่านโปรเจกต์ที่ label ไว้แล้ว เก็บลายเซ็น OD ของทุกกล่องที่เลือก
@@ -223,13 +263,14 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
     wanted = {str(name) for name in (labels or [])}
 
     folder = library_dir(source_project)
-    for stale in folder.glob('*.npz'):
-        stale.unlink(missing_ok=True)
+    for pattern in ('*.npz', 'preview-*.png'):
+        for stale in folder.glob(pattern):
+            stale.unlink(missing_ok=True)
 
     src_mm = float(settings.get('src_mm_per_px') or 0.0)
     src_psf = float(settings.get('src_psf_sigma') or 1.0)
 
-    kept, per_count = [], {}
+    kept, per_count, previewed = [], {}, set()
     skipped = {'no_image': 0, 'flat': 0, 'tiny': 0, 'no_glove': 0}
     for entry in projects.list_images(source_project):
         if entry.get('augmented'):
@@ -310,6 +351,15 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
             kind = settings.get('classes', {}).get(tag) or classify(tag)
             name = f'{_slug(tag)}-{len(kept):04d}.npz'
             np.savez_compressed(folder / name, delta_od=delta_od, mask=mask)
+
+            # A picture of the first one of each kind. Choosing between
+            # nineteen names nobody wrote down the meaning of is guesswork;
+            # choosing between nineteen pictures is looking. Kept with some
+            # rubber around it, because a defect cropped to its own edge is
+            # unrecognisable.
+            if tag not in previewed:
+                _write_preview(folder, tag, gray, x1, y1, x2, y2)
+                previewed.add(tag)
             kept.append({
                 'file': name,
                 'tag': tag,

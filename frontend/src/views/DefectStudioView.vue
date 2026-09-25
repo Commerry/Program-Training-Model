@@ -28,72 +28,9 @@
 
     <div v-if="error" class="banner">{{ error }}</div>
 
-    <!-- ── bring the pictures in; first thing on the page ─────────────── -->
-    <section class="card drop-card">
-      <div
-        :class="['drop', { over: dragging, busy: uploading }]"
-        @dragover.prevent="dragging = true"
-        @dragleave.prevent="dragging = false"
-        @drop.prevent="onDrop"
-        @click="uploading ? null : fileInput?.click()"
-      >
-        <input ref="fileInput" type="file" accept="image/*" multiple
-               class="hidden-input" @change="onPick" />
-        <div class="drop-ring"><Icon name="upload" size="md" /></div>
-        <template v-if="!uploading">
-          <h2>Drop this line's good gloves here</h2>
-          <p>
-            Straight off the camera, no boxes needed. Click to browse, or drag
-            a folder's worth in.
-            <template v-if="!targetName">
-              Somewhere to keep them is made automatically — this is not tied
-              to training and nothing has to be prepared first.
-            </template>
-          </p>
-        </template>
-        <template v-else>
-          <h2>Adding {{ uploadCount }} image(s)…</h2>
-          <div class="upload-bar"><div :style="{ width: uploadPercent + '%' }"></div></div>
-        </template>
-      </div>
-
-      <div class="drop-foot">
-        <label class="inline-field">
-          <span>Kept in</span>
-          <select v-model="targetName" class="control" @change="onTargetChange">
-            <option :value="''">a new project</option>
-            <option v-for="p in projects" :key="p.name" :value="p.name">
-              {{ p.name }} — {{ p.total_images || 0 }} images
-            </option>
-            <option value="__new__">＋ name a new one…</option>
-          </select>
-        </label>
-        <div v-if="makingNew" class="new-project">
-          <input v-model="newName" class="control"
-                 placeholder="e.g. black-line-2" @keyup.enter="createTarget" />
-          <button class="btn btn-secondary" :disabled="!newName.trim() || creating"
-                  @click="createTarget">
-            {{ creating ? 'Creating…' : 'Create' }}
-          </button>
-        </div>
-        <span v-if="goodImages.length" class="count-note">
-          <b>{{ goodImages.length }}</b> unlabelled image(s) ready. Anything
-          already boxed is left alone.
-        </span>
-      </div>
-
-      <div v-if="goodImages.length" class="strip">
-        <figure v-for="img in goodImages.slice(0, 14)" :key="img.filename">
-          <img :src="imageUrl(targetName, img.filename)" :alt="img.filename"
-               loading="lazy" />
-        </figure>
-        <div v-if="goodImages.length > 14" class="more">
-          +{{ goodImages.length - 14 }}
-        </div>
-      </div>
-    </section>
-
-    <!-- ── the defects ────────────────────────────────────────────────── -->
+    <!-- First: what to put on them, which is what somebody came to choose. -->
+    <div class="zone-head"><span class="zone-num">1</span>
+      <h2>The defects to use</h2></div>
     <section class="card">
       <div class="card-head">
         <h2>Defects to put on them</h2>
@@ -195,13 +132,35 @@
       </details>
 
       <template v-if="library && library.total">
-        <div class="chips">
+        <div class="picker-bar">
+          <button class="link-button" @click="tags = usableTags.map(r => r.tag)">
+            Select all
+          </button>
+          <button class="link-button" @click="tags = []">Select none</button>
+          <span class="hint inline">{{ tags.length }} of {{ usableTags.length }} chosen</span>
+        </div>
+
+        <!--
+          A picture each, because the names are a site's own vocabulary and
+          nobody wrote down what they mean. HalfStripLeft is a guess until you
+          see one.
+        -->
+        <div class="label-grid">
           <button v-for="row in usableTags" :key="row.tag"
-                  :class="['chip', row.defect_class, { on: tags.includes(row.tag) }]"
+                  :class="['label-card', { on: tags.includes(row.tag) }]"
                   @click="toggleTag(row.tag)">
-            <i class="dot"></i>
-            <span class="chip-name">{{ row.tag }}</span>
-            <span class="chip-count">{{ row.count }}</span>
+            <div class="label-shot">
+              <img :src="previewUrl(row.tag)" :alt="row.tag" loading="lazy"
+                   @error="$event.target.style.visibility = 'hidden'" />
+              <span class="tick" v-if="tags.includes(row.tag)">
+                <Icon name="check" size="sm" />
+              </span>
+            </div>
+            <div class="label-foot">
+              <i :class="['dot', row.defect_class]"></i>
+              <span class="label-name">{{ row.tag }}</span>
+              <span class="label-count">{{ row.count }}</span>
+            </div>
           </button>
         </div>
 
@@ -216,11 +175,17 @@
             boxes cover the glove. Nothing can be added to a good glove to make
             one true, so they cannot be synthesised:
           </p>
-          <div class="chips">
-            <span v-for="row in wholeGloveTags" :key="row.tag" class="chip off">
-              <span class="chip-name">{{ row.tag }}</span>
-              <span class="chip-count">{{ Math.round(row.share * 100) }}% of the glove</span>
-            </span>
+          <div class="label-grid small">
+            <div v-for="row in wholeGloveTags" :key="row.tag" class="label-card off">
+              <div class="label-shot">
+                <img :src="previewUrl(row.tag)" :alt="row.tag" loading="lazy"
+                     @error="$event.target.style.visibility = 'hidden'" />
+              </div>
+              <div class="label-foot">
+                <span class="label-name">{{ row.tag }}</span>
+                <span class="label-count">{{ Math.round(row.share * 100) }}%</span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="legend">
@@ -230,6 +195,76 @@
             <em>density</em>, a different grey</span>
         </div>
       </template>
+    </section>
+
+    <!--
+      Second: the gloves to put them on. Asking for these first opened the
+      page on the second half of the job.
+    -->
+    <div class="zone-head"><span class="zone-num">2</span>
+      <h2>The good gloves to put them on</h2></div>
+    <section class="card drop-card">
+      <div
+        :class="['drop', { over: dragging, busy: uploading }]"
+        @dragover.prevent="dragging = true"
+        @dragleave.prevent="dragging = false"
+        @drop.prevent="onDrop"
+        @click="uploading ? null : fileInput?.click()"
+      >
+        <input ref="fileInput" type="file" accept="image/*" multiple
+               class="hidden-input" @change="onPick" />
+        <div class="drop-ring"><Icon name="upload" size="md" /></div>
+        <template v-if="!uploading">
+          <h2>Drop this line's good gloves here</h2>
+          <p>
+            Straight off the camera, no boxes needed. Click to browse, or drag
+            a folder's worth in.
+            <template v-if="!targetName">
+              Somewhere to keep them is made automatically — this is not tied
+              to training and nothing has to be prepared first.
+            </template>
+          </p>
+        </template>
+        <template v-else>
+          <h2>Adding {{ uploadCount }} image(s)…</h2>
+          <div class="upload-bar"><div :style="{ width: uploadPercent + '%' }"></div></div>
+        </template>
+      </div>
+
+      <div class="drop-foot">
+        <label class="inline-field">
+          <span>Kept in</span>
+          <select v-model="targetName" class="control" @change="onTargetChange">
+            <option :value="''">a new project</option>
+            <option v-for="p in projects" :key="p.name" :value="p.name">
+              {{ p.name }} — {{ p.total_images || 0 }} images
+            </option>
+            <option value="__new__">＋ name a new one…</option>
+          </select>
+        </label>
+        <div v-if="makingNew" class="new-project">
+          <input v-model="newName" class="control"
+                 placeholder="e.g. black-line-2" @keyup.enter="createTarget" />
+          <button class="btn btn-secondary" :disabled="!newName.trim() || creating"
+                  @click="createTarget">
+            {{ creating ? 'Creating…' : 'Create' }}
+          </button>
+        </div>
+        <span v-if="goodImages.length" class="count-note">
+          <b>{{ goodImages.length }}</b> unlabelled image(s) ready. Anything
+          already boxed is left alone.
+        </span>
+      </div>
+
+      <div v-if="goodImages.length" class="strip">
+        <figure v-for="img in goodImages.slice(0, 14)" :key="img.filename">
+          <img :src="imageUrl(targetName, img.filename)" :alt="img.filename"
+               loading="lazy" />
+        </figure>
+        <div v-if="goodImages.length > 14" class="more">
+          +{{ goodImages.length - 14 }}
+        </div>
+      </div>
     </section>
 
     <!-- ── run ────────────────────────────────────────────────────────── -->
@@ -552,6 +587,10 @@ const whyNotReady = computed(() => {
   if (!tags.value.length) return 'Collect some defects and choose which to use.'
   return ''
 })
+
+const previewUrl = (tag) =>
+  `/api/projects/${encodeURIComponent(sourceName.value)}`
+  + `/defect-library/preview/${encodeURIComponent(tag)}`
 
 const imageUrl = (project, filename) =>
   `/api/projects/${encodeURIComponent(project)}/images/${encodeURIComponent(filename)}/raw`
@@ -1005,6 +1044,100 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 /* ── defect chips ─────────────────────────────────────────────────── */
 .source-row { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.zone-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.6rem;
+}
+.zone-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-primary, var(--text));
+}
+.zone-num {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--grad-accent, var(--accent));
+}
+
+.picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0.85rem 0 0.5rem;
+}
+
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.55rem;
+}
+.label-grid.small { grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); }
+.label-card {
+  padding: 0;
+  border: 1px solid var(--border-color, var(--border));
+  border-radius: 12px;
+  background: var(--bg);
+  cursor: pointer;
+  overflow: hidden;
+  font-family: inherit;
+  text-align: left;
+  transition: border-color 0.15s ease;
+}
+.label-card:hover { border-color: var(--accent); }
+.label-card.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.label-card.off { cursor: default; opacity: 0.5; border-style: dashed; }
+.label-shot {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.label-shot img { width: 100%; height: 100%; object-fit: cover; }
+.tick {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--accent);
+}
+.label-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.72rem;
+  color: var(--text-primary, var(--text));
+}
+.label-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.label-count {
+  margin-left: auto;
+  color: var(--text-tertiary, var(--text-3));
+  font-variant-numeric: tabular-nums;
+}
+
 .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.85rem; }
 .chip {
   display: flex;

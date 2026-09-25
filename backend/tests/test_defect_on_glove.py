@@ -151,6 +151,31 @@ check('it was trimmed to the shape, not left as a box',
 check('and its edge fades rather than being cut',
       0 < float((kept_mask > 10).mean()) - filled, round(filled, 3))
 
+print('\n== a picture of each kind, to choose from ==')
+# Nineteen label names in a site's own vocabulary, with nothing written down
+# about what any of them means. Picking from names is guesswork; picking from
+# pictures is looking.
+r = c.get('/api/projects/pale-line/defect-library/preview/DirtM')
+check('there is a picture for the label', r.status_code == 200, r.status_code)
+check('and it is a png', r.get_data()[:8] == b'\x89PNG\r\n\x1a\n',
+      r.get_data()[:8])
+
+shot = cv2.imdecode(np.frombuffer(r.get_data(), np.uint8), cv2.IMREAD_COLOR)
+check('it decodes', shot is not None)
+if shot is not None:
+    check('small enough for a list', max(shot.shape[:2]) <= 220, shot.shape)
+    # Drawn in colour on a grey picture, so the box is findable by its hue.
+    green = (shot[:, :, 1].astype(int) - shot[:, :, 2].astype(int)) > 40
+    check('with the box drawn on it', green.sum() > 20, int(green.sum()))
+    # Room around the defect: a defect cropped to its own edge is
+    # unrecognisable, and the point of the picture is to recognise it.
+    check('and rubber around it for context',
+          shot.shape[0] > 30 and shot.shape[1] > 30, shot.shape)
+
+r = c.get('/api/projects/pale-line/defect-library/preview/NothingLikeIt')
+check('a label with no picture says so rather than erroring',
+      r.status_code == 404, r.status_code)
+
 print('\n== the glove is found among the machinery ==')
 # Half the size, elsewhere in the frame, and dark instead of pale.
 TARGET_GLOVE = (330, 150, 90, 100)

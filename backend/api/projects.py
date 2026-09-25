@@ -237,6 +237,17 @@ def delete_defect_library(project_name):
     return ok(defectlib.forget(project_name))
 
 
+@projects_bp.get('/<project_name>/defect-library/preview/<tag>')
+def defect_library_preview(project_name, tag):
+    """One picture of what this kind of defect looks like."""
+    from services import defectlib
+    projects.get_project(project_name)
+    path = defectlib.preview_path(project_name, tag)
+    if path is None:
+        raise ProjectError('No preview for that label', status=404)
+    return send_file(str(path), max_age=3600)
+
+
 @projects_bp.post('/<project_name>/defect-synth')
 def start_defect_synth(project_name):
     """Put defects from another project's library onto this one's good gloves."""
