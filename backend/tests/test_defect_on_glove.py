@@ -186,11 +186,12 @@ print('\n== the defect goes where it belongs, at the size it should be ==')
 # The good gloves are already boxed, so nothing here needs a model. That is
 # the point of importing a dataset with Good on every picture.
 with app.app_context():
-    for i in range(6):
-        record = projects.read_annotation('dark-line', f'g{i}.png')
-        record['annotated'] = False        # a good glove is not a labelled one
-        projects.write_annotation('dark-line', f'g{i}.png', record)
-    projects.rebuild_index('dark-line')
+    # Left exactly as an import leaves them: boxed as Good, and therefore
+    # counted as annotated. A good glove in an export is not an unlabelled
+    # picture -- it carries the box that says where the glove is, which is the
+    # box this needs. Treating any boxed picture as already dealt with is what
+    # left nothing to work on.
+    pass
 
 r = c.post('/api/projects/dark-line/defect-synth',
            json={'source_project': 'pale-line', 'tags': ['DirtM'],
@@ -203,13 +204,19 @@ print(f"    {status.get('message')}")
 check('it finishes', status.get('status') == 'finished', status)
 check('and made something', (status.get('made') or 0) >= 3, status.get('made'))
 
+# The good gloves are annotated too -- they carry their Good box -- so the
+# made ones are told apart by being marked as made, not by having boxes.
 with app.app_context():
     made = [projects.read_annotation('dark-line', e['filename'])
             for e in projects.list_images('dark-line')
-            if e.get('annotated')]
+            if e.get('synthetic')]
 
 check('every made picture is boxed', len(made) == status.get('made'),
       (len(made), status.get('made')))
+check('and the good gloves are still there, untouched',
+      len([e for e in projects.list_images('dark-line')
+           if not e.get('synthetic')]) == 6,
+      len([e for e in projects.list_images('dark-line') if not e.get('synthetic')]))
 
 if made:
     box_on = (made[0].get('regions') or [{}])[0]
@@ -248,6 +255,70 @@ check('and it says why rather than failing silently',
       (status.get('no_glove') or 0) == 3, status)
 check('with the count in the message',
       'no glove' in (status.get('message') or ''), status.get('message'))
+
+print('\n== one export with both kinds in it ==')
+# A dataset does not come sorted. The same camera photographs good gloves and
+# bad ones all shift, and the export holds them together: a picture with only
+# a Good box on it is a good glove, and one with a defect box as well is not.
+# The system has to tell them apart itself, because nobody is going to split
+# six thousand files by hand.
+with app.app_context():
+    projects.create_project('mixed-line')
+    for i in range(5):
+        store('mixed-line', f'ok{i}.png', scene(TARGET_GLOVE, DARK, 500 + i), [
+            {'tag': 'Good', 'x': TARGET_GLOVE[0], 'y': TARGET_GLOVE[1],
+             'width': TARGET_GLOVE[2], 'height': TARGET_GLOVE[3]},
+        ])
+    for i in range(3):
+        spot = (TARGET_GLOVE[0] + 30, TARGET_GLOVE[1] + 40)
+        gray = scene(TARGET_GLOVE, DARK, 600 + i, (spot, 9, 0.6))
+        store('mixed-line', f'bad{i}.png', gray, [
+            {'tag': 'Good', 'x': TARGET_GLOVE[0], 'y': TARGET_GLOVE[1],
+             'width': TARGET_GLOVE[2], 'height': TARGET_GLOVE[3]},
+            {'tag': 'HoleLeft', 'x': spot[0] - 12, 'y': spot[1] - 12,
+             'width': 24, 'height': 24},
+        ])
+    projects.rebuild_index('mixed-line')
+
+r = c.post('/api/projects/mixed-line/defect-synth',
+           json={'source_project': 'pale-line', 'tags': ['DirtM'],
+                 'per_image': 1})
+check('the run starts on a mixed project', r.status_code == 200, r.get_json())
+
+with app.app_context():
+    status = defectlib.wait_for_idle('mixed-line', timeout=240)
+print(f"    {status.get('message')}")
+check('it works on the five good gloves',
+      (status.get('made') or 0) == 5, status.get('made'))
+
+with app.app_context():
+    after = projects.list_images('mixed-line')
+check('the three already defective are left alone',
+      len([e for e in after if not e.get('synthetic')]) == 8, len(after))
+check('and the ones it made are marked as made',
+      len([e for e in after if e.get('synthetic')]) == 5,
+      len([e for e in after if e.get('synthetic')]))
+
+print('\n== a project where every picture is already defective ==')
+with app.app_context():
+    projects.create_project('all-bad')
+    for i in range(3):
+        spot = (TARGET_GLOVE[0] + 30, TARGET_GLOVE[1] + 40)
+        gray = scene(TARGET_GLOVE, DARK, 800 + i, (spot, 9, 0.6))
+        store('all-bad', f'b{i}.png', gray, [
+            {'tag': 'Good', 'x': TARGET_GLOVE[0], 'y': TARGET_GLOVE[1],
+             'width': TARGET_GLOVE[2], 'height': TARGET_GLOVE[3]},
+            {'tag': 'HoleLeft', 'x': spot[0] - 12, 'y': spot[1] - 12,
+             'width': 24, 'height': 24},
+        ])
+    projects.rebuild_index('all-bad')
+
+r = c.post('/api/projects/all-bad/defect-synth',
+           json={'source_project': 'pale-line', 'tags': ['DirtM']})
+message = (r.get_json() or {}).get('message', '')
+check('says they already have a defect, not that the project is empty',
+      r.status_code == 400 and 'already have a defect' in message,
+      (r.status_code, message[:120]))
 
 print('\n== a class that describes the whole glove ==')
 # NoFormer, NonStrip, OpenTop: the box is the glove, because the statement is

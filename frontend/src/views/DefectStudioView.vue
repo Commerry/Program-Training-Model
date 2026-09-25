@@ -676,11 +676,22 @@ const loadTarget = async () => {
   }
 }
 
+// A good glove is one with no defect on it -- which is not the same as one
+// with no boxes. An export holds both kinds together and boxes the glove in
+// both, so treating any boxed picture as already dealt with left nothing to
+// work on and reported an empty project that was full.
+const GLOVE_CLASSES = ['good', 'good2', 'nonbad', 'glove', 'ok']
+const isGoodGlove = (image) => {
+  if (image.augmented) return false
+  const tags = image.tags || []
+  return !tags.length || tags.every((t) => GLOVE_CLASSES.includes(String(t).toLowerCase()))
+}
+
 const refreshImages = async () => {
   if (!targetName.value) return
   const { images } = await projectService.images(targetName.value)
   const all = images || []
-  goodImages.value = all.filter((i) => !i.annotated && !i.augmented)
+  goodImages.value = all.filter(isGoodGlove)
   const batch = job.value?.batch
   results.value = batch
     ? all.filter((i) => i.batch === batch && i.annotated)

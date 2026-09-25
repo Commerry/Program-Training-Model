@@ -714,6 +714,17 @@ def start(target_project, source_project, tags, per_image=1, settings=None):
             'choose the ones that are marks on the rubber.')
     chosen = [d for d in chosen if d['tag'] not in unusable]
 
+    ready, already_defective = good_gloves(
+        target_project, (settings or {}).get('glove_classes'))
+    if not ready:
+        if already_defective:
+            raise ProjectError(
+                f'All {already_defective} picture(s) here already have a defect '
+                'on them. This needs good gloves -- pictures with no defect box, '
+                'whether or not they carry a box around the glove itself.')
+        raise ProjectError(
+            "No pictures to work on. Import this line's good gloves first.")
+
     lock = _lock(target_project)
     if not lock.acquire(blocking=False):
         raise ProjectError('A defect run is already going for this project')
@@ -824,24 +835,53 @@ def _spot_on_glove(item, box, rubber, shape, rng):
     return None
 
 
+def good_gloves(project, glove_names=None):
+    """
+    ภาพถุงมือดีในโปรเจกต์นี้ = ไม่มีกรอบเลย หรือมีแต่กรอบถุงมือเท่านั้น
+
+    Returns (entries, already_defective_count).
+
+    An export holds both kinds together -- the same camera photographs good
+    gloves and bad ones all shift -- and a good glove in one is not an
+    unlabelled picture. It carries a box saying Good, which is exactly the box
+    this needs in order to know where the glove is. Treating any boxed picture
+    as already dealt with left nothing to work on, and reported the project as
+    empty when it was full.
+    """
+    good, defective = [], 0
+    for entry in projects.list_images(project):
+        if entry.get('augmented'):
+            continue
+        tags = entry.get('tags') or []
+        if tags and not all(is_glove_class(t, glove_names) for t in tags):
+            defective += 1
+            continue
+        good.append(entry)
+    return good, defective
+
+
 def _synthesise(target, source, chosen, per_image, settings):
     import cv2
 
     from services import defectsynth
     from services.imaging import imread
 
-    # ภาพดีคือภาพที่ยังไม่มีกล่อง -- ของเสียมี label อยู่แล้ว
-    entries = [e for e in projects.list_images(target)
-               if not e.get('augmented') and not e.get('annotated')]
+    glove_names = settings.get('glove_classes')
+    entries, already_defective = good_gloves(target, glove_names)
+
     batch_filter = settings.get('batch')
     if batch_filter is not None:
         entries = [e for e in entries
                    if (projects.read_annotation(target, e['filename']) or {})
                    .get('batch') == int(batch_filter)]
     if not entries:
+        if already_defective:
+            raise ProjectError(
+                f'All {already_defective} picture(s) here already have a defect '
+                'on them. This needs good gloves -- pictures with no defect box, '
+                'whether or not they carry a box around the glove itself.')
         raise ProjectError(
-            'No un-annotated images to work on. Import the good gloves for this '
-            'line first; anything already boxed is left alone.')
+            'No pictures to work on. Import this line\'s good gloves first.')
 
     limit = settings.get('limit')
     if limit:
