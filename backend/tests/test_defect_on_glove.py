@@ -176,6 +176,20 @@ r = c.get('/api/projects/pale-line/defect-library/preview/NothingLikeIt')
 check('a label with no picture says so rather than erroring',
       r.status_code == 404, r.status_code)
 
+print('\n== the preview shows something, on a dark glove too ==')
+# The pictures on this line are dark. A preview that comes back black is
+# indistinguishable from one that failed to load, and both read as "the
+# feature is broken".
+shot = cv2.imdecode(np.frombuffer(
+    c.get('/api/projects/pale-line/defect-library/preview/DirtM').get_data(),
+    np.uint8), cv2.IMREAD_GRAYSCALE)
+check('the preview is not a black square',
+      shot is not None and float(shot.mean()) > 12,
+      None if shot is None else round(float(shot.mean()), 1))
+check('and it has range in it, not one flat tone',
+      shot is not None and float(shot.std()) > 8,
+      None if shot is None else round(float(shot.std()), 1))
+
 print('\n== the glove is found among the machinery ==')
 # Half the size, elsewhere in the frame, and dark instead of pale.
 TARGET_GLOVE = (330, 150, 90, 100)
@@ -280,6 +294,32 @@ check('and it says why rather than failing silently',
       (status.get('no_glove') or 0) == 3, status)
 check('with the count in the message',
       'no glove' in (status.get('message') or ''), status.get('message'))
+
+print('\n== a library collected by an older build ==')
+# It has no record of where on the glove each defect sat, which is what every
+# placement now depends on. It lists perfectly well and produces nothing
+# usable, so it has to say so rather than look current.
+import json as _json                                     # noqa: E402
+lib = defectlib.library_dir('pale-line')
+current = _json.loads((lib / 'meta.json').read_text(encoding='utf-8'))
+old_style = dict(current)
+old_style['defects'] = [{k: v for k, v in d.items() if k not in ('rel', 'share')}
+                        for d in current['defects']]
+(lib / 'meta.json').write_text(_json.dumps(old_style), encoding='utf-8')
+
+body = c.get('/api/projects/pale-line/defect-library').get_json() or {}
+check('it is reported as stale', body.get('stale') is True, body.get('stale'))
+check('and offers nothing to tick, rather than tickable nonsense',
+      body.get('per_tag') == [], body.get('per_tag'))
+
+r = c.post('/api/projects/dark-line/defect-synth',
+           json={'source_project': 'pale-line', 'tags': ['DirtM']})
+message = (r.get_json() or {}).get('message', '')
+check('using it is refused, saying to collect again',
+      r.status_code == 400 and 'Collect defects again' in message,
+      (r.status_code, message[:140]))
+
+(lib / 'meta.json').write_text(_json.dumps(current), encoding='utf-8')
 
 print('\n== one export with both kinds in it ==')
 # A dataset does not come sorted. The same camera photographs good gloves and

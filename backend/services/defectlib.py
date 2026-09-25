@@ -426,12 +426,21 @@ def summary(source_project):
         rows.append(bucket)
 
     rows.sort(key=lambda row: (row['whole_glove'], -row['count']))
+
+    # A library collected by an older build has none of the glove-relative
+    # geometry every placement now depends on, and no preview pictures. It
+    # looks fine in a list and produces nothing usable, so it says so instead
+    # of being offered as if it were current.
+    entries = meta.get('defects') or []
+    stale = bool(entries) and not any(item.get('rel') for item in entries)
+
     return {
         'source_project': source_project,
         'harvested_at': meta.get('harvested_at'),
-        'total': len(meta.get('defects') or []),
+        'total': len(entries),
         'usable_total': sum(r['count'] for r in rows if r['usable']),
-        'per_tag': rows,
+        'per_tag': [] if stale else rows,
+        'stale': stale,
         'skipped': meta.get('skipped') or {},
     }
 
@@ -729,6 +738,13 @@ def start(target_project, source_project, tags, per_image=1, settings=None):
         raise ProjectError(
             f'No defect library for "{source_project}" yet. Collect one from a '
             'project that is already labelled first.')
+
+    if meta.get('defects') and not any(d.get('rel') for d in meta['defects']):
+        raise ProjectError(
+            f'The defects collected from "{source_project}" are from an older '
+            'version and cannot be placed: they have no record of where on the '
+            'glove they sat or how much of it they covered, which is what lets '
+            'them move to a glove of another size. Press Collect defects again.')
 
     chosen = [d for d in meta['defects'] if not tags or d['tag'] in set(tags)]
     if not chosen:

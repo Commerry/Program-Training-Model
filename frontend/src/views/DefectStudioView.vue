@@ -70,6 +70,18 @@
       <p v-else-if="!library.total" class="hint">
         Nothing collected from that project yet. Press <b>Collect defects</b>.
       </p>
+      <!--
+        A library from an older build lists its labels perfectly well and
+        places none of them, because it has no record of where on the glove
+        each defect sat. Saying so beats letting somebody tick nineteen boxes
+        and get nothing.
+      -->
+      <div v-else-if="library.stale" class="banner">
+        These {{ library.total }} defect(s) were collected by an older version
+        and cannot be placed — they carry no record of where on the glove they
+        sat or how much of it they covered, which is what lets them move to a
+        glove of another size. Press <b>Collect defects</b> to read them again.
+      </div>
 
       <!--
         The dropdown lists projects, and somebody arriving with an export from
