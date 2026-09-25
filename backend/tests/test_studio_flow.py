@@ -94,8 +94,13 @@ with zipfile.ZipFile(bundle, 'w') as archive:
         png = cv2.imencode('.png', frame(PALE, 10 + i, (kind, spot, 14)))[1]
         archive.writestr(f'export/images/g{i}.png', png.tobytes())
         index = CLASSES.index('Hole' if kind == 'hole' else 'DirtM')
+        good = CLASSES.index('Good')
+        # Two lines per picture: the glove, and the defect on it. A defect is
+        # stored as a fraction of its glove, so a dataset without the glove
+        # boxed has nothing to take the fraction of.
         archive.writestr(
             f'export/labels/g{i}.txt',
+            f'{good} 0.5 0.53 0.60 0.75\n'
             f'{index} {spot[0] / 320:.6f} {spot[1] / 320:.6f} '
             f'{36 / 320:.6f} {36 / 320:.6f}')
 
@@ -119,19 +124,22 @@ with app.app_context():
     status = datasetimport.wait_for_idle('defects-from-zip', timeout=180)
 print(f"    {status.get('message')}")
 check('every picture came in', status.get('imported') == 8, status)
-check('with its box', status.get('boxes') == 8, status)
+check('with its glove and its defect', status.get('boxes') == 16, status)
 
 listed = (c.get('/api/projects/defects-from-zip/images').get_json() or {}).get('images') or []
 tags = sorted({t for i in listed for t in (i.get('tags') or [])})
 check('named from label.txt, in its own order',
-      tags == ['DirtM', 'Hole'], tags)
+      tags == ['DirtM', 'Good', 'Hole'], tags)
 
 print('\n== collecting the defects from it ==')
 r = c.post('/api/projects/defects-from-zip/defect-library',
            json={'labels': ['DirtM', 'Hole'], 'per_label': 20})
 body = r.get_json() or {}
 check('the collection runs', r.status_code == 200, body)
-check('it found every box', body.get('total') == 8, body.get('total'))
+# Sixteen boxes went in; eight of them are gloves, which are the reference
+# rather than something to collect.
+check('it found every defect, and no gloves', body.get('total') == 8,
+      body.get('total'))
 per_tag = {row['tag']: row for row in (body.get('per_tag') or [])}
 check('a hole is light coming through',
       per_tag.get('Hole', {}).get('defect_class') == 'hole', per_tag)
@@ -148,6 +156,18 @@ files = [(io.BytesIO(cv2.imencode('.png', frame(DARK, 100 + i))[1].tobytes()),
 r = c.post('/api/projects/defect-studio-today/images',
            data={'images': files}, content_type='multipart/form-data')
 check('they upload', r.status_code == 200, r.get_json())
+
+# Where the glove is, without marking these as labelled pictures: they are
+# still the good gloves waiting to have something put on them.
+with app.app_context():
+    for item in (r.get_json() or {}).get('imported') or []:
+        record = projects.read_annotation('defect-studio-today',
+                                          item['filename']) or {}
+        record['regions'] = [{'tag': 'Good', 'x': 64, 'y': 50,
+                              'width': 192, 'height': 240}]
+        record['annotated'] = False
+        projects.write_annotation('defect-studio-today', item['filename'], record)
+    projects.rebuild_index('defect-studio-today')
 
 listed = (c.get('/api/projects/defect-studio-today/images').get_json() or {}).get('images') or []
 check('six of them, none labelled',
@@ -204,8 +224,11 @@ check('the dataset builds', r.status_code == 200, (r.status_code, body))
 built = body.get('dataset') or {}
 check('with the made images in the training set',
       (built.get('train_images') or 0) > 0, built)
-check('and their classes carried through',
-      sorted(built.get('classes') or []) == ['DirtM', 'Hole'],
+# Which defect classes turn up depends on which the run happened to draw,
+# and Good is in there because the good gloves carry their own box -- an
+# image with a box on it is labelled data whether or not a defect was added.
+check('and at least one synthesised defect class is in it',
+      bool({'DirtM', 'Hole'} & set(built.get('classes') or [])),
       built.get('classes'))
 
 print('\n== the two easy mistakes ==')

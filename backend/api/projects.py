@@ -245,11 +245,18 @@ def start_defect_synth(project_name):
     source = (data.get('source_project') or '').strip()
     if not source:
         raise ProjectError('Choose the project whose defects should be used')
+    settings = dict(data.get('settings') or {})
+    # Where the glove is comes from the labels when the pictures have them and
+    # from a model when they do not. Neither is guessed at: a picture whose
+    # glove cannot be found is skipped and counted.
+    for key in ('model_path', 'glove_classes', 'glove_threshold', 'img_size'):
+        if data.get(key) is not None:
+            settings[key] = data[key]
     return ok({'job': defectlib.start(
         project_name, source,
         tags=data.get('tags') or [],
         per_image=int(data.get('per_image') or 1),
-        settings=data.get('settings') or {},
+        settings=settings,
     )})
 
 

@@ -196,13 +196,32 @@
 
       <template v-if="library && library.total">
         <div class="chips">
-          <button v-for="row in library.per_tag" :key="row.tag"
+          <button v-for="row in usableTags" :key="row.tag"
                   :class="['chip', row.defect_class, { on: tags.includes(row.tag) }]"
                   @click="toggleTag(row.tag)">
             <i class="dot"></i>
             <span class="chip-name">{{ row.tag }}</span>
             <span class="chip-count">{{ row.count }}</span>
           </button>
+        </div>
+
+        <!--
+          Shown rather than hidden. These are real classes in the dataset and
+          somebody looking for one needs to find out why it is not on offer,
+          not wonder where it went.
+        -->
+        <div v-if="wholeGloveTags.length" class="unusable">
+          <p class="hint">
+            These describe the whole glove rather than a mark on it — their
+            boxes cover the glove. Nothing can be added to a good glove to make
+            one true, so they cannot be synthesised:
+          </p>
+          <div class="chips">
+            <span v-for="row in wholeGloveTags" :key="row.tag" class="chip off">
+              <span class="chip-name">{{ row.tag }}</span>
+              <span class="chip-count">{{ Math.round(row.share * 100) }}% of the glove</span>
+            </span>
+          </div>
         </div>
         <div class="legend">
           <span><i class="dot hole"></i> light through — the same brightness on
@@ -215,6 +234,25 @@
 
     <!-- ── run ────────────────────────────────────────────────────────── -->
     <section class="card run-card">
+      <!--
+        Where the glove is, in the pictures being worked on. Taken from their
+        own labels when they have them, which a dataset with Good on every
+        frame gives for nothing. A model is only needed when they do not.
+      -->
+      <label class="inline-field wide">
+        <span>Find the glove with</span>
+        <select v-model="gloveModel" class="control">
+          <option :value="''">the boxes already on the pictures</option>
+          <option v-for="m in models" :key="m.path" :value="m.path">
+            {{ m.project }} / {{ m.label }}
+          </option>
+        </select>
+      </label>
+      <p class="hint">
+        A picture whose glove cannot be found is skipped and counted, never
+        guessed at — guessing is what put defects on the machinery.
+      </p>
+
       <div class="run-row">
         <button v-if="!running" class="btn btn-primary big" :disabled="!canRun"
                 @click="run">
@@ -268,7 +306,15 @@
           <div :class="{ warn: job.refused }">
             <dt>Refused</dt><dd>{{ job.refused || 0 }}</dd>
           </div>
+          <div v-if="job.no_glove" class="warn">
+            <dt>No glove</dt><dd>{{ job.no_glove }}</dd>
+          </div>
         </dl>
+        <p v-if="job.no_glove" class="hint">
+          Those pictures were skipped because the glove could not be found in
+          them — either they carry no box and no model was chosen, or the model
+          found none. Nothing was placed anywhere for the sake of placing it.
+        </p>
         <p v-if="job.refused" class="hint">
           Refused means too faint to see against this colour's own noise —
           thrown out rather than written in. A defect nobody can see teaches
@@ -372,6 +418,16 @@ const makingNew = ref(false)
 const newName = ref('')
 const creating = ref(false)
 const downloading = ref(false)
+const models = ref([])
+const gloveModel = ref('')
+
+// Classes whose boxes cover the glove are statements about the whole piece,
+// not marks on it. Kept apart rather than mixed in: ticking one produces
+// pictures that look made and teach the wrong thing.
+const usableTags = computed(
+  () => (library.value?.per_tag || []).filter((row) => !row.whole_glove))
+const wholeGloveTags = computed(
+  () => (library.value?.per_tag || []).filter((row) => row.whole_glove))
 const importingModel = ref(false)
 const modelNote = ref('')
 const modelLabels = ref([])
@@ -527,7 +583,8 @@ const loadLibrary = async () => {
   if (!sourceName.value) return
   try {
     library.value = await projectService.defectLibrary(sourceName.value)
-    tags.value = (library.value.per_tag || []).map((row) => row.tag)
+    tags.value = (library.value.per_tag || [])
+      .filter((row) => !row.whole_glove).map((row) => row.tag)
   } catch {
     library.value = { total: 0, per_tag: [] }
   }
@@ -540,8 +597,10 @@ const collect = async () => {
   try {
     library.value = await projectService.collectDefectLibrary(sourceName.value,
                                                               { per_label: 40 })
-    // Everything chosen to start with: unticking a few beats hunting for them.
-    tags.value = (library.value.per_tag || []).map((row) => row.tag)
+    // Everything usable chosen to start with: unticking a few beats hunting
+    // for them, and the ones that cannot be made are not ticked at all.
+    tags.value = (library.value.per_tag || [])
+      .filter((row) => !row.whole_glove).map((row) => row.tag)
   } catch (err) {
     error.value = errorMessage(err, 'Those defects could not be collected')
   } finally {
@@ -664,7 +723,8 @@ const run = async () => {
     const { job: started } = await projectService.startDefectSynth(
       targetName.value,
       { source_project: sourceName.value, tags: tags.value,
-        per_image: perImage.value })
+        per_image: perImage.value,
+        model_path: gloveModel.value || undefined })
     job.value = started
     poll()
   } catch (err) {
@@ -718,6 +778,10 @@ const poll = () => {
 onMounted(async () => {
   try {
     await refreshProjects()
+    try {
+      models.value = (await trainingService.listTrainedModels())
+        .filter((m) => m.checkpoint === 'best')
+    } catch { /* the picker simply offers none */ }
   } catch (err) {
     error.value = errorMessage(err, 'The projects could not be listed')
   }
@@ -1010,6 +1074,14 @@ onBeforeUnmount(() => clearTimeout(timer))
 .aside ol { padding-left: 1.1rem; }
 .aside li { margin-bottom: 0.2rem; }
 .aside .btn { margin-top: 0.7rem; }
+
+.unusable { margin-top: 0.9rem; }
+.chip.off {
+  cursor: default;
+  opacity: 0.55;
+  border-style: dashed;
+}
+.inline-field.wide { width: 100%; margin-bottom: 0.2rem; }
 
 .legend {
   display: flex;

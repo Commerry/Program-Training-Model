@@ -65,6 +65,18 @@ CLASS_KEYWORDS = (
 
 DEFAULT_CLASS = 'stain'
 
+# Classes that name the glove rather than something wrong with it. Their boxes
+# are what everything else is measured against: how big the glove is in this
+# camera's framing, and whereabouts on it a defect sat.
+GLOVE_CLASSES = ('good', 'good2', 'nonbad', 'glove', 'ok')
+
+# A box this much of the glove is not a blemish on it, it is a statement about
+# the whole piece -- NoFormer, NonStrip, OpenTop. Those cannot be synthesised
+# by putting a patch anywhere: there is no patch that makes a glove not have
+# been stripped. Measured rather than guessed from the name, because the names
+# differ per site and the geometry does not.
+WHOLE_GLOVE_SHARE = 0.55
+
 # ขนาด patch texture ที่เก็บไว้คืนผิวยาง
 TEXTURE_PATCH = 48
 TEXTURE_COUNT = 8
@@ -77,6 +89,35 @@ def classify(label_name):
         if keyword in lowered:
             return kind
     return DEFAULT_CLASS
+
+
+def is_glove_class(tag, extra=None):
+    """ชื่อนี้หมายถึงตัวถุงมือเอง ไม่ใช่ตำหนิ"""
+    lowered = str(tag or '').strip().lower()
+    if extra and lowered in {str(e).strip().lower() for e in extra}:
+        return True
+    return lowered in GLOVE_CLASSES
+
+
+def glove_box(regions, extra=None):
+    """
+    กล่องของถุงมือในภาพนี้ เอาชิ้นใหญ่สุดถ้ามีหลายชิ้น
+
+    Returns (x, y, w, h) or None. Everything downstream is a fraction of this,
+    so a defect that covered a third of the glove still covers a third of it
+    on a camera that frames the glove twice as large.
+    """
+    best = None
+    for region in regions or []:
+        if not is_glove_class(region.get('tag'), extra):
+            continue
+        area = float(region.get('width') or 0) * float(region.get('height') or 0)
+        if area <= 0:
+            continue
+        if best is None or area > best[0]:
+            best = (area, (float(region['x']), float(region['y']),
+                           float(region['width']), float(region['height'])))
+    return best[1] if best else None
 
 
 def _slug(text):
@@ -115,6 +156,60 @@ def _ring_reference(gray, x1, y1, x2, y2):
     return float(np.median(ring))
 
 
+def _tighten(delta_od, spread):
+    """
+    เก็บเฉพาะตัวรอย ตัดสิ่งอื่นที่ติดมาในกรอบออก แล้วไล่ขอบให้จาง
+
+    Returns (delta_od, soft_mask) or (None, None).
+
+    An annotation rectangle is drawn around a defect, not cut out of one:
+    inside it there is usually a piece of the former, a clamp, some
+    background. Taking the whole rectangle carried all of that across, which
+    is why the results looked like squares of machinery pasted over
+    machinery rather than like tears.
+
+    So only the part that actually differs from the surrounding rubber is
+    kept, and only the largest connected piece of it -- a defect is one thing,
+    and the specks left over are the edges of whatever else was in shot. The
+    edge is then feathered, because a real defect fades into the rubber and a
+    cut-out announces itself.
+    """
+    import cv2
+
+    strong = (np.abs(delta_od) > spread * 0.35).astype(np.uint8)
+    if strong.sum() < 12:
+        return None, None
+
+    # One defect, not a scattering of fragments from the rest of the frame.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(strong, 8)
+    if count > 1:
+        largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        strong = (labels == largest).astype(np.uint8)
+    if strong.sum() < 12:
+        return None, None
+
+    # Crop to what is left, so nothing outside it travels at all.
+    ys, xs = np.nonzero(strong)
+    y1, y2 = int(ys.min()), int(ys.max()) + 1
+    x1, x2 = int(xs.min()), int(xs.max()) + 1
+    delta_od = delta_od[y1:y2, x1:x2]
+    strong = strong[y1:y2, x1:x2]
+    if min(delta_od.shape) < 4:
+        return None, None
+
+    # Feather: a couple of pixels of fade at the edge, scaled to the size of
+    # the thing, so a small defect is not blurred away.
+    radius = max(1.0, min(delta_od.shape) * 0.08)
+    ksize = int(2 * round(2 * radius) + 1)
+    alpha = cv2.GaussianBlur(strong.astype(np.float32), (ksize, ksize), radius)
+    alpha = np.clip(alpha, 0.0, 1.0)
+
+    # The density carries the shape with it, so the feather is applied to it
+    # rather than kept as a separate channel the inserter would have to know
+    # about.
+    return (delta_od * alpha).astype(np.float32), (alpha * 255).astype(np.float32)
+
+
 def harvest(source_project, labels=None, per_label=40, settings=None):
     """
     อ่านโปรเจกต์ที่ label ไว้แล้ว เก็บลายเซ็น OD ของทุกกล่องที่เลือก
@@ -134,7 +229,8 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
     src_mm = float(settings.get('src_mm_per_px') or 0.0)
     src_psf = float(settings.get('src_psf_sigma') or 1.0)
 
-    kept, per_count, skipped = [], {}, {'no_image': 0, 'flat': 0, 'tiny': 0}
+    kept, per_count = [], {}
+    skipped = {'no_image': 0, 'flat': 0, 'tiny': 0, 'no_glove': 0}
     for entry in projects.list_images(source_project):
         if entry.get('augmented'):
             continue
@@ -143,6 +239,16 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
         if not regions:
             continue
         if all(r.get('tag') not in wanted for r in regions) and wanted:
+            continue
+
+        # Everything about this defect is recorded as a fraction of the glove
+        # it is on, so without the glove there is nothing to record it
+        # against. Better to skip the picture and say how many were skipped
+        # than to fall back on the frame, which is what put patches on the
+        # machinery in the first place.
+        glove = glove_box(regions, settings.get('glove_classes'))
+        if glove is None:
+            skipped['no_glove'] = skipped.get('no_glove', 0) + 1
             continue
 
         bgr = imread(projects.images_dir(source_project) / entry['filename'])
@@ -155,6 +261,8 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
 
         for region in regions:
             tag = str(region.get('tag') or '')
+            if is_glove_class(tag, settings.get('glove_classes')):
+                continue
             if wanted and tag not in wanted:
                 continue
             if per_count.get(tag, 0) >= per_label:
@@ -182,10 +290,22 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
             if spread < 0.02:
                 skipped['flat'] += 1
                 continue
-            mask = ((np.abs(delta_od) > spread * 0.35).astype(np.uint8) * 255)
-            if mask.sum() == 0:
+
+            delta_od, mask = _tighten(delta_od, spread)
+            if mask is None:
                 skipped['flat'] += 1
                 continue
+
+            # Where it sat on the glove, and how much of it it covered.
+            # Those two fractions are the whole of what transfers; the pixel
+            # counts belong to this camera and mean nothing on another.
+            gx, gy, gw, gh = glove
+            rel = {
+                'cx': ((x1 + x2) / 2 - gx) / gw,
+                'cy': ((y1 + y2) / 2 - gy) / gh,
+                'w': (x2 - x1) / gw,
+                'h': (y2 - y1) / gh,
+            }
 
             kind = settings.get('classes', {}).get(tag) or classify(tag)
             name = f'{_slug(tag)}-{len(kept):04d}.npz'
@@ -198,6 +318,8 @@ def harvest(source_project, labels=None, per_label=40, settings=None):
                 'height': int(y2 - y1),
                 'od_peak': round(spread, 4),
                 'from_image': entry['filename'],
+                'rel': {k: round(v, 4) for k, v in rel.items()},
+                'share': round(rel['w'] * rel['h'], 4),
             })
             per_count[tag] = per_count.get(tag, 0) + 1
 
@@ -226,19 +348,40 @@ def load(source_project):
 
 
 def summary(source_project):
-    """สรุปว่าคลังมี defect อะไรกี่ชิ้น"""
+    """สรุปว่าคลังมี defect อะไรกี่ชิ้น และอันไหนสังเคราะห์ไม่ได้"""
     meta = load(source_project) or {}
     per_tag = {}
     for item in meta.get('defects') or []:
-        bucket = per_tag.setdefault(item['tag'], {'tag': item['tag'],
-                                                  'defect_class': item['defect_class'],
-                                                  'count': 0})
+        bucket = per_tag.setdefault(item['tag'], {
+            'tag': item['tag'],
+            'defect_class': item['defect_class'],
+            'count': 0,
+            'shares': [],
+        })
         bucket['count'] += 1
+        bucket['shares'].append(float(item.get('share') or 0))
+
+    rows = []
+    for bucket in per_tag.values():
+        shares = bucket.pop('shares') or [0.0]
+        share = float(np.median(shares))
+        bucket['share'] = round(share, 3)
+        # A class whose boxes cover most of the glove is not a mark on it, it
+        # is a statement about the whole piece -- NoFormer, NonStrip, OpenTop.
+        # Nothing can be pasted onto a good glove to make one of those true,
+        # so it is reported as unusable rather than offered alongside the
+        # defects that can be moved.
+        bucket['whole_glove'] = share >= WHOLE_GLOVE_SHARE
+        bucket['usable'] = not bucket['whole_glove']
+        rows.append(bucket)
+
+    rows.sort(key=lambda row: (row['whole_glove'], -row['count']))
     return {
         'source_project': source_project,
         'harvested_at': meta.get('harvested_at'),
         'total': len(meta.get('defects') or []),
-        'per_tag': sorted(per_tag.values(), key=lambda row: -row['count']),
+        'usable_total': sum(r['count'] for r in rows if r['usable']),
+        'per_tag': rows,
         'skipped': meta.get('skipped') or {},
     }
 
@@ -423,6 +566,65 @@ def glove_area(gray):
     return mask
 
 
+def find_glove(target, filename, gray, predict, glove_names):
+    """
+    กล่องถุงมือของภาพปลายทาง: จาก label ที่มีอยู่ ถ้าไม่มีก็ให้โมเดลหา
+
+    Returns (x, y, w, h) or None. None means skip the picture: a defect with
+    nowhere to go is better left unmade than put somewhere for the sake of
+    putting it somewhere, which is how patches ended up on the machinery.
+    """
+    stored = projects.read_annotation(target, filename) or {}
+    box = glove_box(stored.get('regions') or [], glove_names)
+    if box:
+        return box, 'label'
+
+    if predict is None:
+        return None, 'no model'
+
+    try:
+        found = predict(projects.images_dir(target) / filename, [])
+    except Exception:  # noqa: BLE001 - one unreadable picture is not fatal
+        return None, 'model failed'
+
+    gloves = [r for r in found if is_glove_class(r.get('tag'), glove_names)]
+    if not gloves:
+        return None, 'no glove found'
+    best = max(gloves, key=lambda r: r['width'] * r['height'])
+    return (best['x'], best['y'], best['width'], best['height']), 'model'
+
+
+def rubber_inside(gray, box):
+    """
+    เนื้อยางภายในกรอบถุงมือ ไม่เอาเหล็กจับกับพื้นหลังที่ติดมาในกรอบ
+
+    Thresholding the whole frame cannot find a glove among machinery. Inside
+    the box it is a different question and an easy one: most of what is here
+    is glove, so the majority side of an Otsu split is the rubber.
+    """
+    import cv2
+
+    x, y, w, h = (int(round(v)) for v in box)
+    x, y = max(0, x), max(0, y)
+    x2, y2 = min(gray.shape[1], x + max(1, w)), min(gray.shape[0], y + max(1, h))
+    if x2 - x < 8 or y2 - y < 8:
+        return None
+
+    crop = np.clip(gray[y:y2, x:x2], 0, 255).astype(np.uint8)
+    _, bright = cv2.threshold(crop, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    dark = 255 - bright
+    # Inside the glove's own box the rubber is the bulk of it.
+    inner = bright if (bright > 0).sum() >= (dark > 0).sum() else dark
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    inner = cv2.morphologyEx(inner, cv2.MORPH_OPEN, kernel)
+    inner = cv2.morphologyEx(inner, cv2.MORPH_CLOSE, kernel)
+
+    mask = np.zeros(gray.shape[:2], np.uint8)
+    mask[y:y2, x:x2] = inner
+    return mask
+
+
 def _positions(mask, count, size, rng):
     """สุ่มตำแหน่งวางบนยาง ห่างขอบพอที่ defect จะอยู่บนยางทั้งชิ้น"""
     import cv2
@@ -480,7 +682,37 @@ def start(target_project, source_project, tags, per_image=1, settings=None):
 
     chosen = [d for d in meta['defects'] if not tags or d['tag'] in set(tags)]
     if not chosen:
+        # The commonest reason is not a wrong tick but a dataset with no box
+        # around the glove itself. Everything is measured against that box, so
+        # without it there is nothing to measure -- and saying "none of those
+        # labels are here" sends somebody looking in the wrong place.
+        missing = (meta.get('skipped') or {}).get('no_glove') or 0
+        if missing:
+            names = ', '.join(GLOVE_CLASSES[:3])
+            raise ProjectError(
+                f'{missing} picture(s) in "{source_project}" have defects but '
+                'no box around the glove itself, so there was nothing to '
+                'measure them against. A defect is recorded as a fraction of '
+                'its glove -- where on it, and how much of it -- which is what '
+                'lets it move to a glove of another size. Label the glove too '
+                f'(a class called {names}) and collect again.')
         raise ProjectError('None of the chosen labels are in that library')
+
+    # A class whose boxes cover the glove is a statement about the whole piece
+    # -- NoFormer, NonStrip, OpenTop -- and nothing can be pasted onto a good
+    # glove to make one true. Refusing is kinder than producing pictures that
+    # look made and teach the wrong thing.
+    unusable = {row['tag'] for row in summary(source_project)['per_tag']
+                if row.get('whole_glove')}
+    asked = {d['tag'] for d in chosen} & unusable
+    if asked:
+        listed = ', '.join(sorted(asked))
+        raise ProjectError(
+            f'{listed} describes the whole glove rather than a mark on it -- '
+            'its boxes cover the glove. Nothing can be added to a good glove '
+            'to make it true, so those cannot be synthesised. Untick them and '
+            'choose the ones that are marks on the rubber.')
+    chosen = [d for d in chosen if d['tag'] not in unusable]
 
     lock = _lock(target_project)
     if not lock.acquire(blocking=False):
@@ -511,6 +743,85 @@ def _run(target, source, chosen, per_image, settings, lock):
             lock.release()
         except RuntimeError:
             pass
+
+
+def _scale_to_glove(defect, item, box):
+    """
+    ย่อขยาย defect ให้กินสัดส่วนของถุงมือเท่าเดิม
+
+    A tear that covered a third of the glove it came from covers a third of
+    the glove it is going to, whatever either camera's framing. Pixels are
+    never carried across: they belong to the camera that recorded them.
+    """
+    import cv2
+
+    rel = item.get('rel') or {}
+    if not rel:
+        return None
+
+    _, _, gw, gh = box
+    want_w = max(4, int(round(rel['w'] * gw)))
+    want_h = max(4, int(round(rel['h'] * gh)))
+
+    delta_od = defect['delta_od']
+    mask = defect['mask'].astype(np.float32)
+    if delta_od.shape[0] < 2 or delta_od.shape[1] < 2:
+        return None
+
+    # INTER_AREA shrinking keeps the integrated density right rather than
+    # sampling whichever pixels the new grid happens to land on.
+    interp = (cv2.INTER_AREA if want_w < delta_od.shape[1] else cv2.INTER_LINEAR)
+    scaled = dict(defect)
+    scaled['delta_od'] = cv2.resize(delta_od, (want_w, want_h),
+                                    interpolation=interp).astype(np.float32)
+    scaled['mask'] = cv2.resize(mask, (want_w, want_h),
+                                interpolation=interp).astype(np.uint8)
+    # Already sized to this glove, so the optics step must not resize again.
+    scaled['src_mm_per_px'] = 0.0
+    return scaled
+
+
+def _spot_on_glove(item, box, rubber, shape, rng):
+    """
+    วางที่ตำแหน่งเดิมบนถุงมือ ขยับเล็กน้อยให้ลงบนเนื้อยางจริง
+
+    A cuff tear belongs at the cuff. Keeping where it sat, as a fraction of
+    the glove, is most of what makes a synthetic defect look like it belongs
+    -- and dropping every defect at a random point inside the glove is the
+    rest of why they did not.
+    """
+    rel = item.get('rel') or {}
+    if not rel:
+        return None
+
+    x, y, w, h = box
+    wanted = (int(round(x + rel['cx'] * w)), int(round(y + rel['cy'] * h)))
+
+    height, width = rubber.shape[:2]
+    half_y, half_x = shape[0] // 2, shape[1] // 2
+
+    def lands_on_rubber(point):
+        cx, cy = point
+        x1, y1 = max(0, cx - half_x), max(0, cy - half_y)
+        x2, y2 = min(width, cx + half_x + 1), min(height, cy + half_y + 1)
+        if x2 <= x1 or y2 <= y1:
+            return 0.0
+        return float((rubber[y1:y2, x1:x2] > 0).mean())
+
+    if lands_on_rubber(wanted) >= 0.6:
+        return wanted
+
+    # Nudge outward in a widening ring rather than jumping somewhere else:
+    # the recorded spot is where this defect belongs and the search should
+    # give it up slowly.
+    for radius in range(4, int(max(w, h) * 0.4) + 5, 4):
+        for _ in range(8):
+            angle = float(rng.uniform(0, 2 * np.pi))
+            candidate = (int(wanted[0] + radius * np.cos(angle)),
+                         int(wanted[1] + radius * np.sin(angle)))
+            if lands_on_rubber(candidate) >= 0.6:
+                return candidate
+    return None
 
 
 def _synthesise(target, source, chosen, per_image, settings):
@@ -559,12 +870,25 @@ def _synthesise(target, source, chosen, per_image, settings):
             existing.append(item['tag'])
     label_ids = {name: index for index, name in enumerate(existing)}
 
+    # Something to find the glove with, when the pictures do not say where it
+    # is. Optional: a project whose good gloves are already boxed needs none.
+    predict = None
+    model_path = settings.get('model_path')
+    if model_path:
+        from services import autolabel, training
+        weights = training.resolve_trained_model(model_path)
+        predict = autolabel._make_predictor(
+            weights, settings.get('img_size') or 640,
+            float(settings.get('glove_threshold') or 0.3))
+
+    glove_names = settings.get('glove_classes')
+
     rng = np.random.default_rng(1234)
     batch = projects.next_batch_number(target)
     imported_at = datetime.now().isoformat()
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    done = made = refused = 0
+    done = made = refused = no_glove = 0
     order = 0
     for entry in entries:
         if (read_json(status_path(target)) or {}).get('cancel_requested'):
@@ -579,19 +903,32 @@ def _synthesise(target, source, chosen, per_image, settings):
             continue
         gray = (cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY) if bgr.ndim == 3 else bgr)
 
-        area = glove_area(gray.astype(np.float32))
+        # Where the glove is. Everything is placed relative to this, so
+        # without it the picture is skipped rather than guessed at.
+        box, how = find_glove(target, entry['filename'], gray, predict, glove_names)
+        if box is None:
+            no_glove += 1
+            continue
+
+        area = rubber_inside(gray.astype(np.float32), box)
+        if area is None or (area > 0).sum() < 200:
+            no_glove += 1
+            continue
+
         working = gray.copy()
         regions = []
 
         for _ in range(max(1, int(per_image))):
             item = chosen[int(rng.integers(len(chosen)))]
             defect = read_defect(source, item, label_ids)
-            size = max(defect['mask'].shape)
-            spots = _positions(area, 1, size, rng)
-            if not spots:
+            scaled = _scale_to_glove(defect, item, box)
+            if scaled is None:
+                continue
+            spot = _spot_on_glove(item, box, area, scaled['mask'].shape, rng)
+            if spot is None:
                 continue
 
-            result = defectsynth.insert_defect(working, defect, spots[0], profile)
+            result = defectsynth.insert_defect(working, scaled, spot, profile)
             if not result['passed']:
                 refused += 1
                 continue
@@ -645,15 +982,17 @@ def _synthesise(target, source, chosen, per_image, settings):
 
         if order % 10 == 0:
             _write_status(target, done=done, made=made, refused=refused,
+                          no_glove=no_glove,
                           message=f'{made} image(s) made, {refused} too faint')
 
     projects.rebuild_index(target)
     projects.refresh_stats(target)
+    tail = f', {no_glove} with no glove found' if no_glove else ''
     _write_status(target, status='finished', done=done, made=made,
-                  refused=refused, batch=batch,
+                  refused=refused, no_glove=no_glove, batch=batch,
                   finished_at=datetime.now().isoformat(),
                   message=f'{made} image(s) made, {refused} refused as too '
-                          f'faint to see, batch {batch}')
+                          f'faint to see{tail}, batch {batch}')
 
 
 def cancel(name):

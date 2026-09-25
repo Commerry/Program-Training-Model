@@ -108,13 +108,22 @@ by_original = {i['original_name']: i['filename'] for i in reply.get('imported') 
 listed = (c.get('/api/projects/pale-line/images').get_json() or {}).get('images') or []
 check('the source images are in', len(listed) == 10, len(listed))
 
+# The glove is boxed as well as the defect. Everything a defect carries with
+# it is a fraction of this box -- where on the glove it sat and how much of it
+# it covered -- and those two fractions are what survive the move to a glove
+# of another size.
+GLOVE_BOX = {'tag': 'Good', 'x': 70, 'y': 50, 'width': 220, 'height': 280}
+
 with app.app_context():
     for name, _gray, (cx, cy), radius, tag in sources:
         stored_name = by_original[name]
         pad = radius + 4
         c.post(f'/api/projects/pale-line/images/{stored_name}/annotations',
-               json={'regions': [{'tag': tag, 'x': cx - pad, 'y': cy - pad,
-                                  'width': pad * 2, 'height': pad * 2}]})
+               json={'regions': [
+                   dict(GLOVE_BOX),
+                   {'tag': tag, 'x': cx - pad, 'y': cy - pad,
+                    'width': pad * 2, 'height': pad * 2},
+               ]})
 
 print('\n== collecting their optical signatures ==')
 r = c.post('/api/projects/pale-line/defect-library',
@@ -134,7 +143,19 @@ check('and dirt as something lying on the rubber',
 
 print('\n== a new line, dark gloves, no defects at all ==')
 c.post('/api/projects', json={'name': 'dark-line'})
-upload('dark-line', [(f'good{i}.png', frame(DARK, 100 + i)) for i in range(8)])
+good_reply = upload('dark-line',
+                    [(f'good{i}.png', frame(DARK, 100 + i)) for i in range(8)])
+# A good glove is not an annotated picture, but the run still has to know
+# where the glove is. The box is written without marking the picture as
+# labelled, which is what a dataset with Good on every frame gives you.
+with app.app_context():
+    for item in (good_reply.get_json() or {}).get('imported') or []:
+        record = projects.read_annotation('dark-line', item['filename']) or {}
+        record['regions'] = [dict(GLOVE_BOX)]
+        record['annotated'] = False
+        projects.write_annotation('dark-line', item['filename'], record)
+    projects.rebuild_index('dark-line')
+
 before = (c.get('/api/projects/dark-line/images').get_json() or {}).get('images') or []
 check('eight good gloves, none of them labelled',
       len(before) == 8 and not any(i.get('annotated') for i in before),

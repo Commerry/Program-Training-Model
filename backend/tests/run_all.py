@@ -66,6 +66,8 @@ SUITES = [
      'moving a defect between glove colours without moving any pixels'),
     ('defect library', TESTS / 'test_defect_library.py', False,
      'collecting defects from one line and putting them on another'),
+    ('defect on glove', TESTS / 'test_defect_on_glove.py', False,
+     'a defect lands on the glove, at the size and spot it had on its own'),
     ('studio flow', TESTS / 'test_studio_flow.py', False,
      'the whole path through the defect studio, as a person walks it'),
     ('review loop', TESTS / 'test_review_loop.py', False,
